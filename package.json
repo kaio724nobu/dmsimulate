@@ -1,14 +1,15 @@
 {
   "name": "card-game-simulator",
   "version": "1.0.0",
-  "description": "デュエル・マスターズ風カードゲームシミュレーター（オンライン2人対戦）",
+  "description": "\u30c7\u30e5\u30a8\u30eb\u30fb\u30de\u30b9\u30bf\u30fc\u30ba\u98a8\u30ab\u30fc\u30c9\u30b2\u30fc\u30e0\u30b7\u30df\u30e5\u30ec\u30fc\u30bf\u30fc\uff08\u30aa\u30f3\u30e9\u30a4\u30f32\u4eba\u5bfe\u6226\uff09",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "ws": "^8.14.2"
+    "ws": "^8.14.2",
+    "@supabase/supabase-js": "^2.39.0"
   },
   "engines": {
     "node": ">=18"
