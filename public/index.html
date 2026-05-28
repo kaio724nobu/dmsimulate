@@ -1,0 +1,2569 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>カードゲームシミュレーター</title>
+<!-- PeerJS: サーバー不要のP2P通信ライブラリ -->
+<style>
+:root {
+  --bg:#0d1117; --panel:#161b22; --border:#30363d;
+  --accent:#238636; --accent2:#1f6feb; --danger:#da3633;
+  --text:#e6edf3; --muted:#8b949e;
+  --cw:63px; --ch:88px; --cw-lg:90px; --ch-lg:126px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',sans-serif;font-size:13px;height:100vh;overflow:hidden}
+button{cursor:pointer;border:none;border-radius:6px;padding:6px 14px;font-size:13px;transition:opacity .15s}
+button:hover{opacity:.85} button:disabled{opacity:.4;cursor:default}
+input,select{background:var(--panel);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:13px;width:100%}
+input:focus,select:focus{outline:2px solid var(--accent2)}
+.btn-green{background:var(--accent);color:#fff}
+.btn-blue{background:var(--accent2);color:#fff}
+.btn-red{background:var(--danger);color:#fff}
+.btn-gray{background:#30363d;color:var(--text)}
+.btn-sm{padding:4px 10px;font-size:12px}
+
+/* ── SCREENS ── */
+.screen{display:none;position:absolute;inset:0}
+.screen.active{display:flex}
+
+/* ── MISC SETUP ── */
+.err{color:#f85149;font-size:12px;margin-top:4px;display:none}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#ffa500;margin-right:4px}
+.status-dot.ready{background:#28a745}
+
+/* ── CARDS ── */
+#screen-cards{flex-direction:column;padding:16px;gap:10px;overflow:hidden}
+.cards-top{display:flex;align-items:center;gap:10px}
+.cards-top h2{font-size:15px}
+.badge{background:var(--accent2);color:#fff;border-radius:20px;padding:2px 10px;font-size:11px}
+.deck-grid{display:flex;flex-wrap:wrap;gap:8px;overflow-y:auto;flex:1;padding:4px}
+.reg-card{position:relative;width:var(--cw-lg);height:var(--ch-lg);border:1px solid var(--border);border-radius:6px;overflow:hidden;cursor:pointer}
+.reg-card img{width:100%;height:100%;object-fit:cover}
+.reg-card .nametag{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.75);padding:2px 4px;font-size:10px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reg-card .del-btn{position:absolute;top:2px;right:2px;background:rgba(218,54,51,.9);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;display:none;align-items:center;justify-content:center}
+.reg-card .copy-btn{position:absolute;top:2px;left:2px;background:rgba(31,111,235,.9);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:13px;cursor:pointer;display:none;align-items:center;justify-content:center;line-height:1}
+.reg-card:hover .del-btn,.reg-card:hover .copy-btn{display:flex}
+.add-card-tile{width:var(--cw-lg);height:var(--ch-lg);border:2px dashed var(--border);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:24px;color:var(--muted);cursor:pointer;flex-shrink:0}
+.add-card-tile:hover{border-color:var(--accent2);color:var(--accent2)}
+.prog-bar-wrap{display:flex;align-items:center;gap:8px}
+.prog-bar-bg{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.prog-bar-fill{height:100%;background:var(--accent2);transition:width .2s;border-radius:3px}
+.cards-foot{display:flex;align-items:center;gap:10px}
+
+
+/* ── WAITING ── */
+#screen-waiting{align-items:center;justify-content:center;flex-direction:column;gap:16px}
+.wait-box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:32px 40px;text-align:center;min-width:320px}
+.room-code{font-size:36px;font-weight:bold;letter-spacing:6px;color:var(--accent2);margin:12px 0;font-family:monospace}
+.dots::after{content:'';animation:dots 1.5s steps(4,end) infinite}
+@keyframes dots{0%,20%{content:''}40%{content:'.'}60%{content:'..'}80%,100%{content:'...'}}
+
+/* ── GAME ── */
+#screen-game{flex-direction:column;overflow:hidden}
+.game-layout{display:grid;grid-template-rows:auto 1fr auto;grid-template-columns:1fr 140px 200px;height:100%}
+
+.top-bar{grid-column:1/4;background:var(--panel);border-bottom:1px solid var(--border);padding:4px 10px;display:flex;align-items:center;gap:10px}
+.turn-badge{background:var(--accent);color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:bold}
+
+.side-col{grid-row:2;display:flex;flex-direction:column;gap:4px;padding:4px;align-items:center}
+.zone-label{font-size:9px;color:var(--muted);text-align:center;line-height:1.2}
+
+.game-center{grid-column:1;grid-row:2;display:flex;flex-direction:column;overflow:hidden}
+
+.zone{border:1px dashed var(--border);border-radius:6px;display:flex;flex-wrap:wrap;gap:4px;padding:4px;transition:background .15s;position:relative}
+.zone.drag-over{background:rgba(31,111,235,.15);border-color:var(--accent2)}
+.zone.my{border-color:#1f6feb44}
+.zone.opp{border-color:#da363344}
+
+.shield-row{display:flex;gap:4px;padding:4px 8px;min-height:104px;align-items:center;justify-content:center;flex-wrap:wrap}
+.battle-area{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.battle-divider{height:1px;background:var(--border);margin:0 8px;position:relative}
+.battle-divider span{position:absolute;left:50%;transform:translateX(-50%) translateY(-50%);background:var(--bg);padding:0 8px;font-size:10px;color:var(--muted);white-space:nowrap}
+.battle-half{flex:1;overflow-x:auto;overflow-y:hidden;display:flex;align-items:center;gap:4px;padding:4px 8px}
+.mana-row{overflow-x:auto;display:flex;gap:4px;padding:4px 8px;min-height:96px;align-items:center;border-top:1px solid var(--border)}
+.hand-row{display:flex;gap:4px;padding:6px 8px;overflow-x:auto;min-height:120px;align-items:flex-end;border-top:1px solid var(--border);background:rgba(31,111,235,.04)}
+
+.action-bar{grid-column:1/4;background:var(--panel);border-top:1px solid var(--border);padding:5px 8px;display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.action-bar .sep{width:1px;height:22px;background:var(--border)}
+
+/* ── CARDS ── */
+.card{width:var(--cw);height:var(--ch);border-radius:4px;cursor:pointer;position:relative;flex-shrink:0;transition:transform .1s,box-shadow .1s;user-select:none}
+.card:hover{transform:translateY(-4px);box-shadow:0 4px 12px rgba(0,0,0,.5);z-index:5}
+.card.tapped{transform:rotate(90deg);margin:12px 6px}
+.card.tapped:hover{transform:rotate(90deg) translateY(-4px)}
+.card.selected{box-shadow:0 0 0 2px #f0b429}
+.card img{width:100%;height:100%;object-fit:cover;border-radius:4px;pointer-events:none;display:block}
+.card-back{width:100%;height:100%;border-radius:4px;background:linear-gradient(135deg,#1f3a5f,#0a1628 50%,#1f3a5f);border:1px solid #2d5a8e;display:flex;align-items:center;justify-content:center;font-size:18px}
+.hand-row .card{width:var(--cw-lg);height:var(--ch-lg)}
+.card-stack{width:var(--cw);height:var(--ch);border-radius:4px;background:linear-gradient(135deg,#1f3a5f,#0a1628 50%,#1f3a5f);border:1px solid #2d5a8e;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:box-shadow .1s;font-size:11px;color:var(--muted)}
+.card-stack:hover{box-shadow:0 0 0 2px var(--accent2)}
+/* スタック表示 */
+.stack-wrap{position:relative;flex-shrink:0}
+.stack-wrap .stack-under{position:absolute;border-radius:4px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);pointer-events:none}
+.stack-badge{position:absolute;top:2px;left:2px;background:rgba(0,0,0,0.82);color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;z-index:6;pointer-events:none;font-weight:bold}
+/* 進化モード */
+.evolve-mode .card[data-zone="battleZone"]{box-shadow:0 0 0 2px #ffd700,0 0 12px rgba(255,215,0,0.6);cursor:crosshair;animation:evolve-pulse 1s ease-in-out infinite alternate}
+@keyframes evolve-pulse{from{box-shadow:0 0 0 2px #ffd700,0 0 8px rgba(255,215,0,0.4)}to{box-shadow:0 0 0 3px #ffd700,0 0 18px rgba(255,215,0,0.8)}}
+.stack-under-mode .card[data-zone="battleZone"]{box-shadow:0 0 0 2px #7ec8f0,0 0 12px rgba(126,200,240,0.6);cursor:crosshair;animation:stack-under-pulse 1s ease-in-out infinite alternate}
+@keyframes stack-under-pulse{from{box-shadow:0 0 0 2px #7ec8f0,0 0 8px rgba(126,200,240,0.4)}to{box-shadow:0 0 0 3px #7ec8f0,0 0 18px rgba(126,200,240,0.8)}}
+#evolve-banner{display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);background:#7c4f00;color:#ffd700;padding:8px 18px;border-radius:8px;font-size:13px;font-weight:bold;z-index:500;pointer-events:none;border:1px solid #ffd700}
+.card-stack .count{font-size:18px;font-weight:bold;color:var(--text)}
+.grave-wrap{width:var(--cw);min-height:var(--ch);border:1px dashed var(--border);border-radius:4px;position:relative;cursor:pointer;flex-shrink:0}
+.grave-wrap img{width:100%;height:100%;border-radius:4px;object-fit:cover;display:block}
+.grave-wrap .gcnt{position:absolute;top:2px;right:3px;background:rgba(0,0,0,.7);border-radius:4px;padding:1px 4px;font-size:10px}
+.grave-empty{width:var(--cw);height:var(--ch);border:1px dashed var(--border);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:10px}
+.card-name-label{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.85);color:#fff;font-size:8px;padding:2px 3px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:0 0 4px 4px;pointer-events:none;z-index:10;line-height:1.3;font-weight:600;letter-spacing:0.3px}
+
+/* ── CONTEXT MENU ── */
+#ctx{position:fixed;z-index:1000;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.5);min-width:180px;display:none;overflow:hidden}
+#ctx .ci{padding:8px 14px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:8px}
+#ctx .ci:hover{background:rgba(255,255,255,.08)}
+#ctx .ci.danger{color:#f85149}
+#ctx .csep{height:1px;background:var(--border);margin:4px 0}
+#ctx .chdr{padding:5px 14px;font-size:11px;color:var(--muted)}
+
+/* ── MODALS ── */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:500;display:none;align-items:center;justify-content:center}
+.overlay.open{display:flex}
+.mbox{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px;max-width:90vw;max-height:85vh;overflow-y:auto}
+.mbox h3{margin-bottom:12px}
+.mcards{display:flex;flex-wrap:wrap;gap:8px}
+.mfoot{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+
+/* ── CHAT COL (game inline) ── */
+.chat-col{grid-column:3;grid-row:2;display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--panel);overflow:hidden;min-width:0}
+.chat-col-hdr{padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;color:var(--text);flex-shrink:0}
+.chat-msgs{flex:1;overflow-y:auto;padding:6px 8px;display:flex;flex-direction:column;gap:4px}
+.cmsg{background:rgba(255,255,255,.05);border-radius:6px;padding:4px 8px}
+.cmsg .sender{font-size:10px;color:var(--muted)}
+.cmsg .txt{font-size:12px;word-break:break-all}
+.cinput{display:flex;gap:4px;padding:6px 8px;border-top:1px solid var(--border);flex-shrink:0}
+.cinput input{flex:1}
+/* ── ADD CARD FORM ── */
+.add-card-form{display:flex;gap:6px;align-items:center;padding:8px 6px;flex-wrap:wrap;background:rgba(31,111,235,.05);border-bottom:1px solid var(--border);flex-shrink:0}
+.add-card-form input{width:auto}
+.civ-chips{display:flex;gap:4px;flex-wrap:wrap}
+.civ-chip{padding:3px 9px;border-radius:5px;cursor:pointer;font-size:12px;border:1px solid var(--border);background:rgba(255,255,255,.05);color:var(--muted);user-select:none;transition:all .12s;white-space:nowrap}
+.civ-chip.active{color:#fff;border-color:transparent}
+.civ-chip[data-civ=fire].active{background:#b22222}
+.civ-chip[data-civ=water].active{background:#1a6fa8}
+.civ-chip[data-civ=nature].active{background:#2e7d32}
+.civ-chip[data-civ=light].active{background:#9a7b00}
+.civ-chip[data-civ=dark].active{background:#5c2d7a}
+.civ-chip[data-civ=rainbow].active{background:linear-gradient(90deg,#b22222,#9a7b00,#2e7d32,#1a6fa8,#5c2d7a);border-color:transparent}
+
+/* ── MISC ── */
+.log-panel{border-bottom:1px solid var(--border);overflow:hidden;background:transparent}
+.log-header{display:flex;align-items:center;justify-content:space-between;padding:4px 8px;cursor:pointer;pointer-events:auto;border-bottom:1px solid var(--border);font-size:11px;font-weight:600;color:var(--muted);user-select:none}
+.log-header:hover{background:rgba(255,255,255,0.05)}
+.log-body{max-height:140px;overflow-y:auto;padding:4px 6px;pointer-events:none}
+.log-body.collapsed{display:none}
+.log-entry{font-size:10px;color:var(--muted);line-height:1.5;border-bottom:1px solid rgba(255,255,255,0.04);padding:1px 0}
+.toast-el{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 20px;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,.4);font-size:13px;transition:opacity .3s}
+#card-preview{position:fixed;z-index:900;pointer-events:none;width:180px;height:252px;border-radius:8px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.6);display:none}
+#card-preview img{width:100%;height:100%;object-fit:cover}
+.turn-overlay{position:fixed;inset:0;z-index:300;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.turn-banner{font-size:28px;font-weight:bold;letter-spacing:4px;padding:12px 32px;border-radius:8px;animation:fadeInOut 2s forwards}
+@keyframes fadeInOut{0%{opacity:0;transform:scale(.8)}20%{opacity:1;transform:scale(1)}80%{opacity:1}100%{opacity:0;transform:scale(1.05)}}
+#reveal-notice{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:400;background:var(--panel);border:1px solid var(--accent2);border-radius:12px;padding:20px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.6);display:none}
+#reveal-notice img{width:120px;height:168px;object-fit:cover;border-radius:6px;margin-bottom:8px}
+
+  /* ── Auth Screen ── */
+  .auth-box { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:28px 24px; width:320px; margin:auto; }
+  .auth-tabs { display:flex; gap:0; margin-bottom:18px; border-bottom:2px solid var(--border); }
+  .auth-tab  { flex:1; padding:8px 0; text-align:center; font-size:13px; cursor:pointer; color:var(--text-muted); border-bottom:3px solid transparent; margin-bottom:-2px; transition:color .2s,border-color .2s; }
+  .auth-tab.active { color:var(--accent); border-color:var(--accent); font-weight:bold; }
+  .auth-err  { color:#e05; font-size:12px; margin-top:8px; min-height:16px; }
+  #screen-auth { flex-direction:column; align-items:center; justify-content:center; }
+</style>
+</head>
+<body>
+
+<!-- ===== DECK REGISTRATION + ROOM SETUP (統合画面) ===== -->
+<!-- ===== AUTH SCREEN ===== -->
+<div id="screen-auth" class="screen active">
+  <div class="auth-box">
+    <div style="text-align:center;font-size:22px;font-weight:bold;margin-bottom:18px">🎴 カードゲーム</div>
+    <div class="auth-tabs">
+      <div class="auth-tab active" id="tab-login"  onclick="authTab('login')">ログイン</div>
+      <div class="auth-tab"        id="tab-register" onclick="authTab('register')">新規登録</div>
+    </div>
+    <input id="auth-user" type="text"     placeholder="ユーザー名" style="width:100%;margin-bottom:8px">
+    <input id="auth-pw"   type="password" placeholder="パスワード" style="width:100%;margin-bottom:8px">
+    <input id="auth-pw2"  type="password" placeholder="パスワード（確認）" style="width:100%;margin-bottom:8px;display:none">
+    <button onclick="doAuth()" style="width:100%">送信</button>
+    <div class="auth-err" id="auth-err"></div>
+  </div>
+</div>
+
+<div id="screen-cards" class="screen">
+
+  <!-- ① 接続バー -->
+  <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--border);flex-wrap:wrap;flex-shrink:0">
+    <span style="font-size:14px;font-weight:bold;white-space:nowrap">🎴 カードゲーム</span>
+    <input id="inp-name" type="text" placeholder="プレイヤー名" value="Player" style="width:110px">
+    <span id="auth-user-display" style="font-size:12px;color:var(--text-muted);white-space:nowrap"></span>
+    <button onclick="doLogout()" title="ログアウト" style="padding:2px 8px;font-size:12px;background:transparent;border:1px solid var(--border);border-radius:4px;cursor:pointer">🚪</button>
+    <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;white-space:nowrap;color:var(--text)">
+      <input type="checkbox" id="chk-local" style="width:auto;cursor:pointer" onchange="onLocalToggle()">
+      <span>🖥 ローカルテスト</span>
+    </label>
+    <span id="peer-status" style="font-size:11px;color:var(--muted);white-space:nowrap">
+      <span class="status-dot" id="dot"></span><span id="dot-label">接続中...</span>
+    </span>
+    <div style="flex:1"></div>
+    <button class="btn-green btn-sm" onclick="createRoom()" id="btn-create" disabled>ルーム作成</button>
+    <span style="color:var(--muted);font-size:11px">または</span>
+    <input id="inp-room" type="text" placeholder="コード入力" maxlength="6" style="width:82px;text-transform:uppercase">
+    <button class="btn-blue btn-sm" onclick="joinRoom()" id="btn-join" disabled>参加</button>
+    <span id="room-label" style="font-size:12px;color:var(--accent2);font-weight:bold;margin-left:4px"></span>
+  </div>
+  <div class="err" id="setup-err" style="padding:0 10px"></div>
+
+  <!-- ② プログレスバー -->
+  <div class="prog-bar-wrap">
+    <span style="font-size:11px;color:var(--muted);white-space:nowrap" id="prog-label">0 / 40枚</span>
+    <div class="prog-bar-bg"><div class="prog-bar-fill" id="prog-fill" style="width:0%"></div></div>
+    <span class="badge" id="deck-badge" style="flex-shrink:0">0枚</span>
+  </div>
+
+  <!-- ③ カード追加フォーム -->
+  <div class="add-card-form">
+    <input id="inp-cname" type="text" placeholder="カード名" style="width:140px">
+    <div class="civ-chips" id="civ-chips">
+      <div class="civ-chip" data-civ="fire"    onclick="toggleCiv(this)">🔥 火</div>
+      <div class="civ-chip" data-civ="water"   onclick="toggleCiv(this)">💧 水</div>
+      <div class="civ-chip" data-civ="nature"  onclick="toggleCiv(this)">🌿 自然</div>
+      <div class="civ-chip" data-civ="light"   onclick="toggleCiv(this)">✨ 光</div>
+      <div class="civ-chip" data-civ="dark"    onclick="toggleCiv(this)">☠ 闇</div>
+      <div class="civ-chip" data-civ="rainbow" onclick="toggleCiv(this)">🌈 レインボー</div>
+    </div>
+    <input id="inp-catk" type="text" placeholder="パワー（例:3000）" style="width:110px">
+    <input id="inp-ccnt" type="number" min="1" max="4" value="1" style="width:52px" title="枚数">
+    <button class="btn-green btn-sm" onclick="addTextCard()">＋ 追加</button>
+  </div>
+
+  <!-- ④ デッキグリッド -->
+  <div class="deck-grid" id="deck-grid"></div>
+
+  <!-- ⑤ フッター -->
+  <div class="cards-foot">
+    <button class="btn-gray btn-sm" onclick="saveDeck()">💾 保存</button>
+    <button class="btn-gray btn-sm" onclick="openLoadModal()">📂 読み込む</button>
+    <span id="opp-status" style="font-size:12px;color:var(--muted);margin-left:4px"></span>
+    <div style="flex:1"></div>
+    <button class="btn-green" id="btn-submit" onclick="submitDeck()" disabled>デッキを提出する</button>
+  </div>
+</div>
+
+<!-- ===== WAITING ===== -->
+<div id="screen-waiting" class="screen">
+  <div class="wait-box">
+    <h2>相手のデッキを待っています</h2>
+    <div class="room-code" id="wait-code">------</div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">ルームコードを相手に共有してください</p>
+    <div style="color:var(--muted);font-size:13px"><span class="dots">待機中</span></div>
+  </div>
+</div>
+
+<!-- ===== GAME ===== -->
+<div id="screen-game" class="screen">
+  <div class="game-layout">
+
+    <!-- 上部バー -->
+    <div class="top-bar">
+      <span id="g-opp" style="font-weight:bold">相手</span>
+      <span id="g-opp-info" style="color:var(--muted);font-size:11px"></span>
+      <div style="flex:1"></div>
+      <span id="g-turn" class="turn-badge">ターン1</span>
+      <span id="g-whose" style="font-size:11px;color:var(--muted)"></span>
+      <div style="flex:1"></div>
+      <span id="g-me" style="font-weight:bold"></span>
+    </div>
+
+    <!-- 中央 -->
+    <div class="game-center">
+      <!-- 相手マナ -->
+      <div style="display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border)">
+        <span style="font-size:9px;color:var(--muted);padding:0 4px;white-space:nowrap">相手<br>マナ</span>
+        <div id="z-opp-mana" class="mana-row zone opp" style="flex:1;min-height:52px;padding:4px 8px"></div>
+      </div>
+      <!-- 相手シールド -->
+      <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--border)">
+        <span style="font-size:9px;color:var(--muted);width:36px">相手<br>シールド</span>
+        <div class="shield-row" id="z-opp-shields"></div>
+      </div>
+      <!-- バトルゾーン -->
+      <div class="battle-area">
+        <div id="z-opp-battle" class="battle-half zone opp"
+             ondragover="onDragOver(event)" ondrop="onDrop(event,'opp_battleZone')"></div>
+        <div class="battle-divider"><span>⚔ バトルゾーン ⚔</span></div>
+        <div id="z-my-battle" class="battle-half zone my"
+             ondragover="onDragOver(event)" ondrop="onDrop(event,'battleZone')"></div>
+      </div>
+      <!-- 自分シールド -->
+      <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-top:1px solid var(--border)">
+        <span style="font-size:9px;color:var(--muted);width:36px">自分<br>シールド</span>
+        <div class="shield-row zone my" id="z-my-shields"
+             ondragover="onDragOver(event)" ondrop="onDrop(event,'shieldZone')"></div>
+      </div>
+      <!-- マナ -->
+      <div style="display:flex;align-items:center;gap:6px;border-top:1px solid var(--border)">
+        <span style="font-size:9px;color:var(--muted);padding:0 4px;white-space:nowrap">マナ<br>ゾーン</span>
+        <div id="z-my-mana" class="mana-row zone my"
+             ondragover="onDragOver(event)" ondrop="onDrop(event,'manaZone')" style="flex:1"></div>
+      </div>
+      <!-- 手札 -->
+      <div id="z-my-hand" class="hand-row zone my"
+           ondragover="onDragOver(event)" ondrop="onDrop(event,'hand')"></div>
+    </div>
+
+    <!-- 右列: 山札 + 墓地（統合・縦並び） -->
+    <div class="side-col" style="grid-column:2;grid-row:2;padding:6px 3px;justify-content:center;gap:0">
+      <!-- 相手エリア -->
+      <div style="display:flex;flex-direction:column;align-items:center;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;width:134px">
+        <div style="font-size:9px;color:var(--muted);padding:2px 0;background:rgba(218,54,51,0.12);width:100%;text-align:center;letter-spacing:1px">相手</div>
+        <div style="display:flex;width:100%">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:1px;padding:3px;flex:1;border-right:1px solid var(--border)">
+            <div class="zone-label">山札</div>
+            <div class="card-stack" onclick="ctxOppDeck()">
+              <div class="card-back" style="font-size:10px"></div>
+              <span class="count" id="opp-dc">0</span><span>枚</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:1px;padding:3px;flex:1">
+            <div class="zone-label">墓地</div>
+            <div id="z-opp-grave" class="grave-empty" onclick="openGrave('opp')" style="cursor:default">空</div>
+          </div>
+        </div>
+      </div>
+      <!-- セパレータ -->
+      <div style="height:10px"></div>
+      <!-- 自分エリア -->
+      <div style="display:flex;flex-direction:column;align-items:center;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;width:134px">
+        <div style="display:flex;width:100%">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:1px;padding:3px;flex:1;border-right:1px solid var(--border)">
+            <div class="zone-label">墓地</div>
+            <div id="z-my-grave" class="grave-empty" onclick="openGrave('my')"
+                 ondragover="onDragOver(event)" ondrop="onDrop(event,'graveyard')">空</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:1px;padding:3px;flex:1">
+            <div class="zone-label">山札</div>
+            <div class="card-stack" onclick="act('draw',{count:1})" oncontextmenu="ctxMyDeck(event);return false;">
+              <div class="card-back" style="font-size:10px"></div>
+              <span class="count" id="my-dc">0</span><span>枚</span>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:9px;color:var(--muted);padding:2px 0;background:rgba(31,111,235,0.12);width:100%;text-align:center;letter-spacing:1px">自分</div>
+      </div>
+    </div>
+
+    <!-- アクションバー -->
+    <div class="action-bar">
+      <button class="btn-blue btn-sm" onclick="act('draw',{count:1})">ドロー</button>
+      <button class="btn-gray btn-sm" onclick="act('shuffle')">シャッフル</button>
+      <button class="btn-gray btn-sm" onclick="doLookTop()">上N枚</button>
+      <button class="btn-gray btn-sm" onclick="doSearch()">サーチ</button>
+      <div class="sep"></div>
+      <button class="btn-gray btn-sm" onclick="doCheckShields()">🛡 シールドを確認</button>
+      <button class="btn-gray btn-sm" onclick="act('untap_all')">全アンタップ</button>
+      <button class="btn-gray btn-sm" onclick="doReqPick()">手札を選ばせる</button>
+      <div class="sep"></div>
+      <span id="g-whose2" style="font-size:11px;color:var(--muted)"></span>
+      <div style="flex:1"></div>
+      <button class="btn-green btn-sm" id="btn-end" onclick="act('end_turn')">ターン終了</button>
+    </div>
+
+    <!-- チャットカラム（ログ含む） -->
+    <div class="chat-col">
+      <div class="log-panel">
+        <div class="log-header" onclick="toggleLog()">
+          <span>📋 ログ</span>
+          <span id="log-toggle-icon">▲</span>
+        </div>
+        <div class="log-body" id="log-panel"></div>
+      </div>
+      <div class="chat-col-hdr">💬 チャット</div>
+      <div class="chat-msgs" id="chat-msgs"></div>
+      <div class="cinput">
+        <input id="chat-in" type="text" placeholder="メッセージ" style="width:auto;flex:1">
+        <button class="btn-blue btn-sm" onclick="sendChat()">送信</button>
+      </div>
+    </div>
+
+  </div><!-- /game-layout -->
+
+</div><!-- /screen-game -->
+
+<!-- モーダル: シールドブレイク / Sトリガー確認 -->
+<div class="overlay" id="modal-shield-break">
+  <div class="mbox" style="max-width:360px;text-align:center">
+    <div class="mhdr">🛡 シールドブレイク</div>
+    <div id="sb-img" style="width:var(--cw-lg);height:var(--ch-lg);margin:10px auto;border-radius:6px;overflow:hidden;border:2px solid var(--border)"></div>
+    <div id="sb-name" style="font-weight:bold;font-size:14px;margin:6px 0;color:var(--text)"></div>
+    <!-- 確認フェーズ -->
+    <div id="sb-phase-confirm">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">S・トリガーを宣言しますか？</div>
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+        <button class="btn btn-primary" style="font-size:13px;padding:8px 18px" onclick="sbDeclare()">🔺 S・トリガー宣言！</button>
+        <button class="btn" style="font-size:13px;padding:8px 18px" onclick="sbToHand()">✋ 手札に加える</button>
+      </div>
+    </div>
+    <!-- 宣言後フェーズ -->
+    <div id="sb-phase-zone" style="display:none">
+      <div style="font-size:12px;color:#ffd700;margin-bottom:10px;font-weight:bold">S・トリガー発動！ どこへ置きますか？</div>
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+        <button class="btn btn-primary" style="font-size:13px;padding:8px 16px" onclick="sbZone('battleZone')">⚔ バトルゾーン</button>
+        <button class="btn" style="font-size:13px;padding:8px 16px" onclick="sbZone('manaZone')">💧 マナゾーン</button>
+        <button class="btn danger" style="font-size:13px;padding:8px 16px" onclick="sbZone('graveyard')">💀 墓地</button>
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn" style="font-size:11px" onclick="sbToHand()">↩ やっぱり手札へ</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 進化モードバナー -->
+<div id="evolve-banner">🔺 進化先のクリーチャーをクリック（ESCでキャンセル）</div>
+<!-- スタック下置きバナー -->
+<div id="stack-under-banner" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);background:#1a3a5c;color:#7ec8f0;padding:8px 18px;border-radius:8px;font-size:13px;font-weight:bold;z-index:500;pointer-events:none;border:1px solid #7ec8f0">📥 下に置くカードをクリック（ESCでキャンセル）</div>
+
+<!-- コンテキストメニュー -->
+<div id="ctx">
+  <div class="chdr" id="ctx-title"></div>
+  <div id="ctx-items"></div>
+</div>
+
+<!-- モーダル: デッキ/サーチ -->
+<div class="overlay" id="modal-deck">
+  <div class="mbox" style="max-width:700px;min-width:300px">
+    <h3 id="mdeck-title">山札</h3>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px" id="mdeck-tip"></div>
+    <div class="mcards" id="mdeck-cards" style="max-height:55vh;overflow-y:auto"></div>
+    <div class="mfoot">
+      <button class="btn-green btn-sm" id="mdeck-ok" onclick="applyReorder()">この順番で確定</button>
+      <button class="btn-gray btn-sm" onclick="closeM('modal-deck')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- モーダル: デッキ読み込み -->
+<div class="overlay" id="modal-load-deck">
+  <div class="mbox" style="min-width:320px;max-width:460px">
+    <h3>保存済みデッキ</h3>
+    <div id="deck-load-items" style="display:flex;flex-direction:column;gap:8px;max-height:55vh;overflow-y:auto;margin-bottom:4px"></div>
+    <div class="mfoot"><button class="btn-gray btn-sm" onclick="closeM('modal-load-deck')">閉じる</button></div>
+  </div>
+</div>
+
+<!-- モーダル: 墓地 -->
+<div class="overlay" id="modal-grave">
+  <div class="mbox" style="max-width:700px">
+    <h3 id="mgrave-title">墓地</h3>
+    <div class="mcards" id="mgrave-cards" style="max-height:60vh;overflow-y:auto"></div>
+    <div class="mfoot"><button class="btn-gray btn-sm" onclick="closeM('modal-grave')">閉じる</button></div>
+  </div>
+</div>
+
+
+<!-- モーダル: シールド確認 -->
+<div class="overlay" id="modal-shield-check">
+  <div class="mbox" style="max-width:720px;min-width:300px">
+    <h3>🛡 シールドを確認（自分のみ表示）</h3>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">カードをクリックして選択（複数可）</div>
+    <div class="mcards" id="schk-cards" style="max-height:50vh;overflow-y:auto;gap:10px"></div>
+    <div style="font-size:12px;color:var(--accent2);font-weight:bold;margin:10px 0" id="schk-count">0枚選択中</div>
+    <div class="mfoot" id="schk-foot" style="flex-wrap:wrap;gap:6px"></div>
+  </div>
+</div>
+
+<!-- モーダル: ピック -->
+<div class="overlay" id="modal-pick">
+  <div class="mbox">
+    <h3>手札選択リクエスト</h3>
+    <p style="color:var(--muted);font-size:12px;margin-bottom:10px" id="pick-msg"></p>
+    <div class="mcards" id="pick-cards"></div>
+    <div class="mfoot"><button class="btn-gray btn-sm" onclick="closeM('modal-pick')">キャンセル</button></div>
+  </div>
+</div>
+
+<!-- カード公開 -->
+<div id="reveal-notice">
+  <div id="rn-name" style="font-size:12px;color:var(--muted);margin-bottom:4px"></div>
+  <img id="rn-img" src="">
+  <div id="rn-card" style="font-size:13px;font-weight:bold"></div>
+  <button class="btn-gray btn-sm" style="margin-top:8px" onclick="$('reveal-notice').style.display='none'">閉じる</button>
+</div>
+
+<!-- プレビュー -->
+<div id="card-preview"><img id="prev-img" src=""></div>
+
+<script>
+// ================================================================
+// ゲームエンジン（ホストブラウザで動作）
+// ================================================================
+class GameEngine {
+  constructor() { this.gs = null; }
+
+  init(p0, p1) {
+    // p0, p1: { id, name, deck:[{id,name,imageId}] }
+    this.gs = {
+      players: [this._mkP(p0), this._mkP(p1)],
+      turn: 0, turnNumber: 1, log: [], pendingPick: null,
+    };
+    this.gs.players.forEach(p => {
+      this._shuffle(p.deck);
+      for (let i = 0; i < 5 && p.deck.length; i++) {
+        const c = p.deck.shift();
+        c.shieldPos = i; // 位置番号を付与
+        p.shieldZone.push(c);
+      }
+      p.shieldSlotCount = 5; // 初期スロット数
+      for (let i = 0; i < 5 && p.deck.length; i++) p.hand.push(p.deck.shift());
+    });
+  }
+
+  _mkP(p) {
+    return {
+      id: p.id, name: p.name,
+      deck: p.deck.map(c => ({ ...c, tapped: false, faceDown: false })),
+      hand: [], battleZone: [], manaZone: [], shieldZone: [], graveyard: [],
+      shieldSlotCount: 0, // シールドスロット総数（穴あき表示用）
+    };
+  }
+
+  _shuffle(a) {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+  }
+
+  _log(msg) {
+    this.gs.log.unshift({ t: Date.now(), msg });
+    if (this.gs.log.length > 50) this.gs.log.pop();
+  }
+
+  _find(p, cardId, zone) { return (p[zone] || []).find(c => c.id === cardId); }
+
+  _remove(me, opp, cardId, zone) {
+    let t = me, z = zone;
+    if (zone.startsWith('opp_')) { t = opp; z = zone.slice(4); }
+    const a = t[z]; if (!a) return null;
+    const i = a.findIndex(c => c.id === cardId);
+    if (i < 0) return null;
+    return a.splice(i, 1)[0];
+  }
+
+  _insert(me, opp, card, zone, pos) {
+    let t = me, z = zone;
+    if (zone.startsWith('opp_')) { t = opp; z = zone.slice(4); }
+    const a = t[z]; if (!a) return;
+    // シールドゾーンに追加する場合は位置番号を割り当て
+    if (z === 'shieldZone' && card.shieldPos === undefined) {
+      const used = new Set(a.map(c => c.shieldPos));
+      let newPos = 0;
+      while (used.has(newPos)) newPos++;
+      card.shieldPos = newPos;
+      if (newPos >= t.shieldSlotCount) t.shieldSlotCount = newPos + 1;
+    }
+    if (pos === 'top') a.unshift(card);
+    else if (pos === 'bottom') a.push(card);
+    else if (typeof pos === 'number') a.splice(pos, 0, card);
+    else a.push(card);
+  }
+
+  processAction(playerIdx, action) {
+    const gs = this.gs;
+    const me = gs.players[playerIdx], opp = gs.players[1 - playerIdx];
+
+    switch (action.type) {
+      case 'draw': {
+        const n = action.count || 1; let d = 0;
+        for (let i = 0; i < n && me.deck.length; i++) { me.hand.push(me.deck.shift()); d++; }
+        this._log(`${me.name} が ${d}枚ドロー`);
+        return { ok: true };
+      }
+      case 'shuffle': {
+        this._shuffle(me.deck);
+        this._log(`${me.name} がシャッフル`);
+        return { ok: true };
+      }
+      case 'view_deck':
+        return { ok: true, priv: { type: 'deck_view', cards: me.deck } };
+      case 'look_top': {
+        const n = Math.min(action.count || 1, me.deck.length);
+        return { ok: true, priv: { type: 'look_top', cards: me.deck.slice(0, n) } };
+      }
+      case 'search_deck':
+        return { ok: true, priv: { type: 'deck_search', cards: me.deck } };
+      case 'reorder_deck': {
+        const m = Object.fromEntries(me.deck.map(c => [c.id, c]));
+        me.deck = action.order.map(id => m[id]).filter(Boolean);
+        this._log(`${me.name} が山札を並び替え`);
+        return { ok: true };
+      }
+      case 'move_card': {
+        const { cardId, fromZone, toZone, tapped, faceDown, position } = action;
+        const card = this._remove(me, opp, cardId, fromZone);
+        if (!card) return { error: 'Card not found: ' + fromZone };
+        // スタックがある場合、下のカードをバトルゾーンに浮上させる
+        const cleanZone = fromZone.startsWith('opp_') ? fromZone.slice(4) : fromZone;
+        if (cleanZone === 'battleZone' && card.stack && card.stack.length > 0) {
+          const [next, ...rest] = card.stack;
+          next.stack = rest;
+          next.tapped = card.tapped;
+          const target = fromZone.startsWith('opp_') ? opp : me;
+          target.battleZone.push(next);
+        }
+        const destCard = { ...card, stack: [] };
+        if (tapped !== undefined) destCard.tapped = tapped;
+        if (faceDown !== undefined) destCard.faceDown = faceDown;
+        // シールドゾーンへ移動する場合のみ revealed フラグを適用（省略時は裏向き）
+        if (toZone === 'shieldZone') destCard.revealed = action.revealed === true;
+        else destCard.revealed = undefined;
+        this._insert(me, opp, destCard, toZone, position);
+        // シールド→手札はカード名を隠す（相手に内容を見せない）
+        // 非公開ゾーンからの移動はカード名を隠し、ゾーン名で代替
+        const fromZoneNames = { hand:'手札のカード', shieldZone:'シールドのカード',
+          deck:'山札のカード', opp_shieldZone:'相手シールドのカード' };
+        const isPrivateLog = (cleanZone === 'shieldZone') || (cleanZone === 'deck')
+          || (cleanZone === 'hand' && ['shieldZone','deck'].includes(toZone));
+        const logName = isPrivateLog
+          ? (fromZoneNames[fromZone] || fromZoneNames[cleanZone] || '非公開のカード')
+          : (destCard.name || '?');
+        const toLabel = { hand:'手札', battleZone:'バトルゾーン', manaZone:'マナゾーン',
+          shieldZone:'シールドゾーン', graveyard:'墓地', deck:'山札' };
+        this._log(`${me.name}: ${logName} → ${toLabel[toZone] || toZone}`);
+        return { ok: true };
+      }
+      case 'stack_on': {
+        // カードを既存のバトルゾーンカードの上に重ねる（進化）
+        const { cardId, fromZone, targetId } = action;
+        const card = this._remove(me, opp, cardId, fromZone);
+        if (!card) return { error: 'Card not found' };
+        const targetIdx = me.battleZone.findIndex(c => c.id === targetId);
+        if (targetIdx < 0) return { error: 'Target not found' };
+        const target = me.battleZone[targetIdx];
+        card.stack = [target, ...(target.stack || [])];
+        card.tapped = target.tapped;
+        target.stack = [];
+        me.battleZone[targetIdx] = card;
+        this._log(`${me.name}: ${card.name} が ${target.name} に進化`);
+        return { ok: true };
+      }
+      case 'preview_shield': {
+        // シールドを破る前にカードを確認（Sトリガー判定用）
+        const { cardId: shId } = action;
+        const shCard = me.shieldZone.find(c => c.id === shId);
+        if (!shCard) return { error: 'シールドが見つかりません' };
+        return { ok: true, priv: { type: 'shield_preview', card: shCard } };
+      }
+      case 'peek_shields': {
+        // 自分のシールドを全て確認（プライベート）
+        return { ok: true, priv: { type: 'shields_peek', cards: me.shieldZone.map(c => ({ ...c })) } };
+      }
+      case 'move_top_card': {
+        // 山札の一番上のカードを指定ゾーンへ移動
+        const { toZone: mttZ, position: mttPos, revealed: mttRev, faceDown: mttFD } = action;
+        if (!me.deck.length) return { error: '山札が空です' };
+        const topCard = me.deck.shift();
+        if (mttZ === 'shieldZone') topCard.revealed = mttRev === true;
+        if (mttFD !== undefined) topCard.faceDown = mttFD;
+        this._insert(me, opp, topCard, mttZ, mttPos);
+        const toLabel = { hand:'手札', battleZone:'バトルゾーン', manaZone:'マナゾーン',
+          shieldZone:'シールドゾーン', graveyard:'墓地' };
+        const dirLabel = mttFD ? '（裏向き）' : '';
+        this._log(`${me.name}: 山札上 → ${toLabel[mttZ] || mttZ}${dirLabel}`);
+        return { ok: true };
+      }
+      case 'stack_under': {
+        // カードをスタックの一番下に置く
+        const { cardId: suId, fromZone: suFrom, targetId: suTarget } = action;
+        const suCard = this._remove(me, opp, suId, suFrom);
+        if (!suCard) return { error: 'Card not found' };
+        const suIdx = me.battleZone.findIndex(c => c.id === suTarget);
+        if (suIdx < 0) return { error: 'Target not found' };
+        const suTop = me.battleZone[suIdx];
+        // スタックの一番下に追加
+        const suClean = { ...suCard, stack: [] };
+        if (!suTop.stack) suTop.stack = [];
+        suTop.stack.push(suClean);
+        this._log(`${me.name}: ${suCard.name||'?'} を ${suTop.name||'?'} の下に置いた`);
+        return { ok: true };
+      }
+      case 'unstack_bottom': {
+        // スタックの一番下のカードを墓地へ
+        const { cardId } = action;
+        const top = me.battleZone.find(c => c.id === cardId);
+        if (!top || !top.stack || top.stack.length === 0) return { error: 'No stack' };
+        const bottom = top.stack.pop();
+        this._log(`${me.name}: ${bottom.name} をスタックから除去`);
+        me.graveyard.push({ ...bottom, stack: [] });
+        return { ok: true };
+      }
+      case 'tap': {
+        const card = this._find(me, action.cardId, action.zone);
+        if (!card) return { error: 'Not found' };
+        card.tapped = !card.tapped;
+        this._log(`${me.name}: ${card.name || '?'} ${card.tapped ? 'タップ' : 'アンタップ'}`);
+        return { ok: true };
+      }
+      case 'untap_all': {
+        [...me.battleZone, ...me.manaZone].forEach(c => c.tapped = false);
+        this._log(`${me.name} が全アンタップ`);
+        return { ok: true };
+      }
+      case 'end_turn': {
+        gs.turn = 1 - gs.turn;
+        if (gs.turn === 0) gs.turnNumber++;
+        const next = gs.players[gs.turn];
+        [...next.battleZone, ...next.manaZone].forEach(c => c.tapped = false);
+        this._log(`ターン${gs.turnNumber}: ${next.name} のターン`);
+        return { ok: true };
+      }
+      case 'request_pick': {
+        gs.pendingPick = { requesterId: me.id, message: action.message || '手札を1枚選んでください' };
+        this._log(`${me.name} が相手に手札選択を要求`);
+        return {
+          ok: true,
+          toOpp: { type: 'pick_request', message: gs.pendingPick.message, cards: me.hand },
+        };
+      }
+      case 'pick_response': {
+        if (!gs.pendingPick) return { error: 'No pending pick' };
+        const reqId = gs.pendingPick.requesterId;
+        const req = gs.players.find(p => p.id === reqId);
+        const { cardId, toZone } = action;
+        if (req) {
+          const card = this._remove(req, me, cardId, 'hand');
+          if (card && toZone) {
+            this._insert(req, me, card, toZone);
+            this._log(`${me.name} が ${card.name || '?'} を選択`);
+          }
+        }
+        gs.pendingPick = null;
+        return { ok: true, toReq: { type: 'pick_result', cardId } };
+      }
+      case 'reveal': {
+        const card = me.hand.find(c => c.id === action.cardId);
+        if (!card) return { error: 'Not found' };
+        this._log(`${me.name} が ${card.name || '?'} を公開`);
+        return { ok: true, toOpp: { type: 'card_revealed', card, from: me.name } };
+      }
+      case 'chat_log': {
+        this._log(action.msg || '');
+        return { ok: true };
+      }
+      case 'flip': {
+        // カードの表/裏を切り替え
+        const { cardId: fId, zone: fZone } = action;
+        const fCard = this._find(me, fId, fZone);
+        if (!fCard) return { error: 'Card not found' };
+        fCard.faceDown = !fCard.faceDown;
+        const dir = fCard.faceDown ? '裏向き' : '表向き';
+        const fLabel = { battleZone:'バトルゾーン', manaZone:'マナゾーン', graveyard:'墓地', shieldZone:'シールドゾーン' };
+        this._log(`${me.name}: ${fLabel[fZone]||fZone} のカードを${dir}にした`);
+        return { ok: true };
+      }
+      default: return { error: 'Unknown: ' + action.type };
+    }
+  }
+
+  getStateFor(playerIdx) {
+    const gs = this.gs;
+    if (!gs) return null;
+    return {
+      players: gs.players.map((p, i) => ({
+        id: p.id, name: p.name,
+        deckCount: p.deck.length,
+        hand: i === playerIdx ? p.hand : p.hand.map(() => ({ id: '__h__', hidden: true })),
+        handCount: p.hand.length,
+        battleZone: p.battleZone,
+        manaZone: p.manaZone,
+        shieldZone: p.shieldZone.map(c => c.revealed
+          ? { ...c }
+          : { id: c.id, hidden: true, shieldPos: c.shieldPos }),
+        shieldCount: p.shieldZone.length,
+        shieldSlotCount: p.shieldSlotCount,
+        graveyard: p.graveyard,
+      })),
+      turn: gs.turn, turnNumber: gs.turnNumber,
+      myIndex: playerIdx,
+      log: gs.log.slice(0, 20),
+      pendingPick: gs.pendingPick
+        ? { message: gs.pendingPick.message, requesterId: gs.pendingPick.requesterId }
+        : null,
+    };
+  }
+}
+
+// ================================================================
+// STATE
+// ================================================================
+const engine = new GameEngine();
+const imageStore = new Map(); // imageId -> dataUrl
+let ws = null;       // WebSocket接続
+let wsReady = false;
+let localBC = null;  // BroadcastChannel（ローカルテスト用）
+
+const S = {
+  screen: 'setup',
+  isLocal: false, // ローカルテストモード
+  isHost: false,
+  playerId: null,
+  playerIdx: null, // 0=host, 1=guest
+  playerName: '',
+  roomCode: null,
+  // カード登録
+  localCards: [],  // {localId, name, imageId, dataUrl}
+  deckSubmitted: false,
+  oppReady: false,
+  // ゲーム
+  gs: null,
+  drag: null,
+  deckViewCards: [],
+  deckViewMode: '',
+  evolveFrom: null,    // 進化モード中の元カード情報
+  stackUnderFrom: null, // スタック下置きモード中の元カード情報
+  sTriggerQueue: [],    // S・トリガー処理キュー（複数シールド）
+  logCollapsed: false,  // ログ折りたたみ状態
+  // 認証
+  authToken: null,
+  authUser: null,
+  savedDecks: {},
+};
+
+// ================================================================
+// UTILS
+// ================================================================
+function $(id) { return document.getElementById(id); }
+function showScreen(n) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  $('screen-' + n).classList.add('active');
+  S.screen = n;
+}
+function toast(msg, ms = 2800) {
+  const e = document.createElement('div');
+  e.className = 'toast-el'; e.textContent = msg;
+  document.body.appendChild(e);
+  setTimeout(() => { e.style.opacity = '0'; setTimeout(() => e.remove(), 300); }, ms);
+}
+function closeM(id) { $(id).classList.remove('open'); }
+function openM(id) { $(id).classList.add('open'); }
+function genId() { return Math.random().toString(36).substr(2, 8); }
+
+// ================================================================
+// P2P SETUP (PeerJS)
+// ================================================================
+function initWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host);
+  ws.onopen = () => {
+    wsReady = true;
+    $('dot').className = 'status-dot ready';
+    $('dot-label').textContent = 'サーバー接続済み';
+    $('btn-create').disabled = false;
+    $('btn-join').disabled = false;
+  };
+  ws.onclose = () => {
+    wsReady = false;
+    $('dot').className = 'status-dot';
+    $('dot-label').textContent = '再接続中...';
+    $('btn-create').disabled = true;
+    $('btn-join').disabled = true;
+    setTimeout(initWS, 2000); // 自動再接続
+  };
+  ws.onerror = () => {};
+  ws.onmessage = e => {
+    let data;
+    try { data = JSON.parse(e.data); } catch { return; }
+    onWSMessage(data);
+  };
+}
+
+function onWSMessage(data) {
+  switch (data.type) {
+    case 'room_created':
+      S.roomCode = data.roomCode;
+      $('room-label').textContent = 'ルーム: ' + data.roomCode;
+      $('wait-code').textContent = data.roomCode;
+      showScreen('cards');
+      renderDeckGrid();
+      break;
+    case 'room_joined':
+      S.roomCode = data.roomCode;
+      S.oppName = data.opponentName;
+      $('room-label').textContent = 'ルーム: ' + data.roomCode;
+      showScreen('cards');
+      renderDeckGrid();
+      sendP2P({ type: 'guest_joined', name: S.playerName });
+      break;
+    case 'opponent_joined':
+      toast('相手 ' + data.opponentName + ' が参加しました！');
+      $('opp-status').textContent = '相手が接続しました';
+      S.oppName = data.opponentName;
+      break;
+    case 'opponent_left':
+      if (S.screen === 'game') toast('対戦相手が切断しました');
+      break;
+    case 'error':
+      showErr(data.message);
+      break;
+    default:
+      // relayされてきたゲームデータ
+      onData(data);
+  }
+}
+
+// ================================================================
+// SETUP SCREEN
+// ================================================================
+$('btn-create').disabled = true;
+$('btn-join').disabled = true;
+
+function onLocalToggle() {
+  const on = $('chk-local').checked;
+  S.isLocal = on;
+  $('peer-status').style.display = on ? 'none' : '';
+  if (on) {
+    // ローカルモードはPeerJS不要なので即座にボタンを有効化
+    $('btn-create').disabled = false;
+    $('btn-join').disabled = false;
+    $('dot-label').textContent = 'ローカルモード（BroadcastChannel）';
+  } else {
+    // WebSocketモードに戻す
+    $('btn-create').disabled = !wsReady;
+    $('btn-join').disabled = !wsReady;
+    $('dot-label').textContent = wsReady ? 'サーバー接続済み' : '再接続中...';
+  }
+}
+
+function createRoom() {
+  const name = $('inp-name').value.trim() || 'Player';
+  S.playerName = name;
+  S.isHost = true;
+  S.playerIdx = 0;
+  S.playerId = 'host';
+  const code = Math.random().toString(36).substr(2, 6).toUpperCase();
+  S.roomCode = code;
+
+  if (S.isLocal) {
+    // ── ローカルテストモード ──
+    if (localBC) localBC.close();
+    localBC = new BroadcastChannel('CGS-' + code);
+    localBC.onmessage = e => onDataAsHost(e.data);
+    $('room-label').textContent = '【ローカル】' + code;
+    $('wait-code').textContent = code;
+    showScreen('cards');
+    renderDeckGrid();
+    toast('タブ2でこのコードを入力して参加 → ' + code, 5000);
+  } else {
+    // ── WebSocketモード ──
+    if (!wsReady) { showErr('サーバーへ接続中… 少し待ってください'); return; }
+    ws.send(JSON.stringify({ type: 'create_room', name }));
+  }
+}
+
+function joinRoom() {
+  const name = $('inp-name').value.trim() || 'Player';
+  const code = $('inp-room').value.trim().toUpperCase();
+  if (!code || code.length < 4) { showErr('ルームコードを入力してください'); return; }
+  S.playerName = name;
+  S.isHost = false;
+  S.playerIdx = 1;
+  S.playerId = 'guest';
+  S.roomCode = code;
+
+  if (S.isLocal) {
+    // ── ローカルテストモード ──
+    if (localBC) localBC.close();
+    localBC = new BroadcastChannel('CGS-' + code);
+    localBC.onmessage = e => onDataAsGuest(e.data);
+    $('room-label').textContent = '【ローカル】' + code;
+    showScreen('cards');
+    renderDeckGrid();
+    sendP2P({ type: 'guest_joined', name: S.playerName });
+    toast('タブ1に接続しました！');
+  } else {
+    // ── WebSocketモード ──
+    if (!wsReady) { showErr('サーバーへ接続中… 少し待ってください'); return; }
+    ws.send(JSON.stringify({ type: 'join_room', roomCode: code, name }));
+  }}
+
+function showErr(msg) {
+  const e = $('setup-err');
+  e.textContent = msg; e.style.display = 'block';
+  setTimeout(() => e.style.display = 'none', 5000);
+}
+
+$('inp-room').addEventListener('input', function() { this.value = this.value.toUpperCase(); });
+
+// ================================================================
+// P2P SEND / RECEIVE
+// ================================================================
+function sendP2P(data) {
+  if (S.isLocal && localBC) {
+    localBC.postMessage(data); // BroadcastChannel: ローカルテスト用
+  } else if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'relay', data }));
+  }
+}
+
+function onData(data) {
+  // ホストとゲストで役割が違う
+  if (S.isHost) {
+    onDataAsHost(data);
+  } else {
+    onDataAsGuest(data);
+  }
+}
+
+// 両者のデッキが揃ったらゲームを開始（順番不問）
+function tryStartGame() {
+  if (!S.hostDeck || !S.guestDeck) return; // まだ揃っていない
+  const guestName = S.guestName || S.oppName || 'Guest';
+  engine.init(
+    { id: 'host', name: S.playerName, deck: S.hostDeck },
+    { id: 'guest', name: guestName,   deck: S.guestDeck }
+  );
+  // ランダムに先行後行を決定
+  engine.gs.turn = Math.random() < 0.5 ? 0 : 1;
+  engine._log(`先行: ${engine.gs.players[engine.gs.turn].name}`);
+  const hostImages = S.hostDeck
+    .map(c => ({ id: c.imageId, data: imageStore.get(c.imageId) }))
+    .filter(x => x.data);
+  sendP2P({ type: 'game_start', state: engine.getStateFor(1), images: hostImages });
+  S.gs = engine.getStateFor(0);
+  initGameUI();
+  showScreen('game');
+  renderGame();
+  showTurnBanner();
+}
+
+// ホストがデータを受け取ったとき
+function onDataAsHost(data) {
+  switch (data.type) {
+    case 'guest_joined':
+      toast('相手 ' + data.name + ' が参加しました！');
+      $('opp-status').textContent = '相手接続済み: ' + data.name;
+      S.oppName = data.name;
+      break;
+
+    case 'deck_submit': {
+      // ゲストのデッキ+画像を受信して保存
+      (data.images || []).forEach(img => imageStore.set(img.id, img.data));
+      S.guestDeck = data.cards;
+      S.guestName = data.name;
+      // ホストデッキが揃っていればゲーム開始、未提出ならホスト側の提出を待つ
+      tryStartGame();
+      break;
+    }
+
+    case 'action': {
+      // ゲストのアクションを処理
+      const result = engine.processAction(1, data.action);
+      if (result.error) { sendP2P({ type: 'error', message: result.error }); return; }
+      if (result.priv) sendP2P(result.priv);
+      if (result.toOpp) /* toOpp = ゲストへ */ sendP2P(result.toOpp);
+      if (result.toReq) {
+        const reqIsHost = engine.gs.players[0].id === 'host' && result.toReq;
+        // ゲストからのpick_responseなので通知先はホスト（自分）
+        handlePrivate(result.toReq);
+      }
+      // 状態更新
+      S.gs = engine.getStateFor(0);
+      renderGame();
+      sendP2P({ type: 'state', state: engine.getStateFor(1) });
+      break;
+    }
+
+    case 'chat':
+      appendChat(data.sender, data.text);
+      sendP2P({ type: 'chat_bcast', sender: data.sender, text: data.text }); // echo back
+      break;
+
+    default:
+      handleCommon(data);
+  }
+}
+
+// ゲストがデータを受け取ったとき
+function onDataAsGuest(data) {
+  switch (data.type) {
+    case 'game_start':
+      (data.images || []).forEach(img => imageStore.set(img.id, img.data));
+      S.gs = data.state;
+      initGameUI();
+      showScreen('game');
+      renderGame();
+      showTurnBanner();
+      break;
+
+    case 'state': {
+      const prevTurn = S.gs ? S.gs.turn : null; // 更新前に保存
+      S.gs = data.state;
+      renderGame();
+      if (prevTurn !== null && S.gs.turn !== prevTurn) {
+        showTurnBanner(S.gs.turn === S.gs.myIndex);
+      }
+      break;
+    }
+
+    case 'chat_bcast':
+      // 自分が送ったメッセージは既にローカル表示済みなので相手のメッセージだけ表示
+      if (data.sender !== S.playerName) appendChat(data.sender, data.text);
+      break;
+
+    default:
+      handleCommon(data);
+  }
+}
+
+// 共通メッセージ（ホスト・ゲスト共通）
+function handleCommon(data) {
+  switch (data.type) {
+    case 'deck_view':
+    case 'deck_search':
+      S.deckViewMode = data.type === 'deck_search' ? 'search' : 'view';
+      S.deckViewCards = data.cards;
+      showDeckModal(data.type === 'deck_search' ? 'サーチ' : '山札確認', data.cards, data.type === 'deck_search');
+      break;
+    case 'look_top':
+      showLookTop(data.cards);
+      break;
+    case 'pick_request':
+      showPickModal(data);
+      break;
+    case 'pick_result':
+      closeM('modal-pick');
+      toast('カードが選ばれました');
+      break;
+    case 'card_revealed':
+      showReveal(data.card, data.from);
+      break;
+    case 'shields_peek':
+      // ゲスト: ホストから受け取ったシールドデータを表示
+      showShieldCheckModal(data.cards);
+      break;
+    case 'error':
+      toast('エラー: ' + data.message);
+      break;
+  }
+}
+
+function handlePrivate(data) {
+  switch (data.type) {
+    case 'pick_result':
+      closeM('modal-pick'); toast('カードが選ばれました'); break;
+  }
+}
+
+// ================================================================
+// DECK SAVE / LOAD
+// ================================================================
+const DECK_STORE_KEY = 'cgs_decks_v1'; // legacy key (migration only)
+
+function getSavedDecks() {
+  return S.savedDecks || {};
+}
+
+async function syncDecks() {
+  if (!S.authToken) return;
+  try {
+    const r = await fetch('/api/decks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + S.authToken },
+      body: JSON.stringify(S.savedDecks)
+    });
+    if (!r.ok) console.warn('syncDecks failed:', r.status);
+  } catch(e) { console.warn('syncDecks error:', e); }
+}
+
+function autoSaveDeck() {
+  if (S.localCards.length === 0) return;
+  const now = new Date();
+  const mm = now.getMonth() + 1;
+  const dd = now.getDate();
+  const hh = String(now.getHours()).padStart(2, '0');
+  const min = String(now.getMinutes()).padStart(2, '0');
+  const key = `[自動] ${mm}/${dd} ${hh}:${min}`;
+  const decks = getSavedDecks();
+  decks[key] = S.localCards.map(c => ({
+    name: c.name,
+    civs: c.civs || ['fire'],
+    power: c.power || '',
+  }));
+  // 自動保存は最新10件だけ残す
+  const autoKeys = Object.keys(decks).filter(k => k.startsWith('[自動]'));
+  if (autoKeys.length > 10) {
+    autoKeys.sort();
+    autoKeys.slice(0, autoKeys.length - 10).forEach(k => delete decks[k]);
+  }
+  S.savedDecks = decks;
+  syncDecks();
+}
+
+function saveDeck() {
+  if (S.localCards.length === 0) { toast('保存するカードがありません'); return; }
+  const name = prompt('デッキ名を入力してください', 'マイデッキ');
+  if (!name || !name.trim()) return;
+  const key = name.trim();
+  const decks = getSavedDecks();
+  decks[key] = S.localCards.map(c => ({
+    name: c.name,
+    civs: c.civs || ['fire'],
+    power: c.power || '',
+  }));
+  S.savedDecks = decks;
+  syncDecks();
+  toast(`「${key}」を保存しました（${S.localCards.length}枚）`);
+}
+
+function openLoadModal() {
+  const decks = getSavedDecks();
+  const names = Object.keys(decks);
+  const container = $('deck-load-items');
+  container.innerHTML = '';
+  if (names.length === 0) {
+    container.innerHTML = '<p style="color:var(--muted);font-size:13px">保存済みのデッキがありません</p>';
+  } else {
+    names.forEach(name => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:6px;border:1px solid var(--border)';
+      const info = document.createElement('span');
+      info.style.cssText = 'font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      info.textContent = `${name}（${decks[name].length}枚）`;
+      const loadBtn = document.createElement('button');
+      loadBtn.className = 'btn-blue btn-sm'; loadBtn.textContent = '読み込む';
+      loadBtn.onclick = () => applyLoadDeck(name);
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn-red btn-sm'; delBtn.textContent = '削除';
+      delBtn.onclick = () => {
+        if (!confirm(`「${name}」を削除しますか？`)) return;
+        const d = getSavedDecks(); delete d[name];
+        S.savedDecks = d; syncDecks();
+        openLoadModal(); // リスト更新
+      };
+      row.appendChild(info); row.appendChild(loadBtn); row.appendChild(delBtn);
+      container.appendChild(row);
+    });
+  }
+  openM('modal-load-deck');
+}
+
+function applyLoadDeck(name) {
+  const decks = getSavedDecks();
+  const cards = decks[name];
+  if (!cards || !cards.length) { toast('デッキデータが見つかりません'); return; }
+  S.localCards = [];
+  cards.forEach(c => {
+    const civs = Array.isArray(c.civs) && c.civs.length ? c.civs : ['fire'];
+    const dataUrl = generateCardImage(c.name, civs, c.power || '');
+    const imageId = genId();
+    imageStore.set(imageId, dataUrl);
+    S.localCards.push({ localId: genId(), name: c.name, imageId, dataUrl, civs, power: c.power || '' });
+  });
+  renderDeckGrid();
+  closeM('modal-load-deck');
+  toast(`「${name}」を読み込みました（${S.localCards.length}枚）`);
+}
+
+// ================================================================
+// CARD REGISTRATION（テキスト入力方式）
+// ================================================================
+const CIV_COLORS = { fire:'#b22222', water:'#1a6fa8', nature:'#2e7d32', light:'#9a7b00', dark:'#5c2d7a', rainbow:null };
+const CIV_LABELS = { fire:'火', water:'水', nature:'自然', light:'光', dark:'闇', rainbow:'レインボー' };
+
+function toggleCiv(el) { el.classList.toggle('active'); }
+
+function getSelectedCivs() {
+  return [...document.querySelectorAll('#civ-chips .civ-chip.active')].map(el => el.dataset.civ);
+}
+
+function generateCardImage(name, civs, power) {
+  if (!Array.isArray(civs) || civs.length === 0) civs = ['fire'];
+  const c = document.createElement('canvas');
+  c.width = 160; c.height = 224;
+  const ctx = c.getContext('2d');
+
+  // 背景：レインボーは虹グラデーション、それ以外は縦分割
+  if (civs.length === 1 && civs[0] === 'rainbow') {
+    const grad = ctx.createLinearGradient(0, 0, 160, 224);
+    grad.addColorStop(0,    '#b22222');
+    grad.addColorStop(0.25, '#9a7b00');
+    grad.addColorStop(0.5,  '#2e7d32');
+    grad.addColorStop(0.75, '#1a6fa8');
+    grad.addColorStop(1,    '#5c2d7a');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 160, 224);
+  } else {
+    const drawCivs = civs.filter(cv => cv !== 'rainbow');
+    const allCivs  = drawCivs.length ? drawCivs : ['fire'];
+    const segW = 160 / allCivs.length;
+    allCivs.forEach((civ, i) => {
+      ctx.fillStyle = CIV_COLORS[civ] || '#444';
+      ctx.fillRect(Math.floor(i * segW), 0, Math.ceil(segW) + 1, 224);
+    });
+    // レインボーが混じっていれば虹グラデーションを薄く重ねる
+    if (civs.includes('rainbow')) {
+      const grad = ctx.createLinearGradient(0, 0, 160, 0);
+      grad.addColorStop(0,   'rgba(255,200,50,0.35)');
+      grad.addColorStop(0.5, 'rgba(255,255,255,0.15)');
+      grad.addColorStop(1,   'rgba(180,100,255,0.35)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 160, 224);
+    }
+  }
+
+  // 内枠
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(6, 6, 148, 212);
+
+  // 文明バー（下）
+  ctx.fillStyle = 'rgba(0,0,0,0.38)';
+  ctx.fillRect(0, 188, 160, 36);
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(civs.map(cv => CIV_LABELS[cv] || cv).join('/'), 80, 206);
+
+  // カード名（折り返しあり）
+  ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 4;
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.textBaseline = 'top';
+  const chars = [...name];
+  const lines = []; let line = '';
+  for (const ch of chars) {
+    const test = line + ch;
+    if (ctx.measureText(test).width > 138 && line) { lines.push(line); line = ch; if (lines.length >= 4) break; }
+    else line = test;
+  }
+  if (line) lines.push(line);
+  lines.slice(0, 4).forEach((l, i) => ctx.fillText(l, 12, 14 + i * 22));
+
+  // パワー
+  if (power) {
+    ctx.font = 'bold 15px sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(power, 80, 162);
+  }
+  ctx.shadowBlur = 0;
+  return c.toDataURL('image/jpeg', 0.85);
+}
+
+function addTextCard() {
+  const name = $('inp-cname').value.trim();
+  if (!name) { toast('カード名を入力してください'); $('inp-cname').focus(); return; }
+  if (S.localCards.length >= 40) { toast('デッキは40枚が上限です'); return; }
+  const civs  = getSelectedCivs();
+  if (civs.length === 0) { toast('文明を1つ以上選んでください'); return; }
+  const power = $('inp-catk').value.trim();
+  const count = Math.min(parseInt($('inp-ccnt').value) || 1, 40 - S.localCards.length);
+  const dataUrl = generateCardImage(name, civs, power);
+  const imageId = genId();
+  imageStore.set(imageId, dataUrl);
+  for (let i = 0; i < count; i++) {
+    S.localCards.push({ localId: genId(), name, imageId, dataUrl, civs, power });
+  }
+  $('inp-cname').value = ''; $('inp-catk').value = ''; $('inp-ccnt').value = '1';
+  renderDeckGrid();
+  $('inp-cname').focus();
+  toast(`「${name}」を ${count}枚追加しました`, 1600);
+}
+
+function copyCard(localId, e) {
+  e.stopPropagation();
+  const src = S.localCards.find(c => c.localId === localId);
+  if (!src) return;
+  if (S.localCards.length >= 40) { toast('デッキは40枚が上限です'); return; }
+  S.localCards.push({ localId: genId(), name: src.name, imageId: src.imageId, dataUrl: src.dataUrl, civs: src.civs, power: src.power });
+  renderDeckGrid();
+  toast(`「${src.name}」を1枚追加`, 1200);
+}
+
+function removeCard(localId, e) {
+  e.stopPropagation();
+  S.localCards = S.localCards.filter(c => c.localId !== localId);
+  renderDeckGrid();
+}
+
+function updateName(localId, name) {
+  const c = S.localCards.find(c => c.localId === localId);
+  if (c) c.name = name.trim() || c.name;
+}
+
+function renderDeckGrid() {
+  const grid = $('deck-grid');
+  grid.innerHTML = '';
+
+  for (const card of S.localCards) {
+    const el = document.createElement('div');
+    el.className = 'reg-card';
+    el.innerHTML = `
+      <img src="${card.dataUrl}" alt="${card.name}">
+      <div class="nametag" contenteditable="true" spellcheck="false"
+           onblur="updateName('${card.localId}',this.textContent)">${card.name}</div>
+      <button class="del-btn" onclick="removeCard('${card.localId}',event)">✕</button>
+      <button class="copy-btn" onclick="copyCard('${card.localId}',event)">＋</button>`;
+    grid.appendChild(el);
+  }
+
+  const cnt = S.localCards.length;
+  $('deck-badge').textContent = cnt + '枚';
+  $('deck-badge').style.background = cnt >= 40 ? '#238636' : cnt >= 20 ? '#1f6feb' : '#6e7681';
+  const pct = Math.min(cnt / 40 * 100, 100);
+  $('prog-fill').style.width = pct + '%';
+  $('prog-fill').style.background = cnt >= 40 ? '#238636' : '#1f6feb';
+  $('prog-label').textContent = `${cnt} / 40枚`;
+  $('btn-submit').disabled = cnt === 0;
+}
+
+function submitDeck() {
+  if (S.localCards.length === 0) { toast('カードを追加してください'); return; }
+  if (!S.roomCode) { toast('先にルームを作成、または参加してください'); return; }
+  autoSaveDeck(); // デッキ提出時に自動保存
+  S.deckSubmitted = true;
+  $('btn-submit').disabled = true;
+
+  const cards = S.localCards.map(c => ({ id: genId(), name: c.name, imageId: c.imageId }));
+  const images = S.localCards.map(c => ({ id: c.imageId, data: imageStore.get(c.imageId) }))
+    .filter((x, i, a) => a.findIndex(y => y.id === x.id) === i); // unique
+
+  if (S.isHost) {
+    S.hostDeck = cards;
+    toast('デッキ提出完了！相手の提出を待っています...');
+    $('wait-code').textContent = S.roomCode;
+    showScreen('waiting');
+    // ゲストがすでに提出済みならそのまま開始
+    tryStartGame();
+  } else {
+    // ゲストはホストに送る
+    sendP2P({ type: 'deck_submit', cards, images, name: S.playerName });
+    toast('デッキを提出しました。ゲーム開始を待っています...');
+    $('wait-code').textContent = S.roomCode;
+    showScreen('waiting');
+  }
+}
+
+// ================================================================
+// GAME UI
+// ================================================================
+function initGameUI() {
+  const gs = S.gs;
+  $('g-me').textContent = gs.players[gs.myIndex].name;
+  $('g-opp').textContent = gs.players[1 - gs.myIndex].name;
+}
+
+function getMe() { return S.gs && S.gs.players[S.gs.myIndex]; }
+function getOpp() { return S.gs && S.gs.players[1 - S.gs.myIndex]; }
+
+// ================================================================
+// RENDER
+// ================================================================
+function renderGame() {
+  const gs = S.gs; if (!gs) return;
+  const me = gs.players[gs.myIndex], opp = gs.players[1 - gs.myIndex];
+
+  $('opp-dc').textContent = opp.deckCount;
+  $('my-dc').textContent = me.deckCount;
+  $('g-opp-info').textContent = `山札:${opp.deckCount} 手札:${opp.handCount} マナ:${opp.manaZone.length}`;
+  $('g-turn').textContent = 'ターン ' + gs.turnNumber;
+  const myT = gs.turn === gs.myIndex;
+  $('g-whose').textContent = myT ? '▶ あなたのターン' : '相手のターン';
+  $('g-whose2').textContent = myT ? '▶ あなたのターン' : '相手のターン';
+  $('btn-end').disabled = !myT;
+
+  renderZone('z-my-hand',    me.hand,       'hand',       true,  true);
+  renderZone('z-my-battle',  me.battleZone, 'battleZone', true,  true);
+  renderZone('z-opp-battle', opp.battleZone,'opp_battleZone',true,false);
+  renderZone('z-my-mana',    me.manaZone,   'manaZone',   true,  true);
+  renderZone('z-opp-mana',   opp.manaZone,  'opp_manaZone', true, false);
+  renderShields('z-my-shields',  me.shieldZone,  true);
+  renderShields('z-opp-shields', opp.shieldZone, false);
+  renderGrave('z-my-grave',  me.graveyard,  true);
+  renderGrave('z-opp-grave', opp.graveyard, false);
+  renderLog(gs.log);
+}
+
+function renderZone(id, cards, zone, showFront, isMyZone) {
+  const el = $(id); el.innerHTML = '';
+  for (const card of cards) {
+    if ((zone === 'battleZone' || zone === 'opp_battleZone') && card.stack && card.stack.length > 0) {
+      el.appendChild(mkStackWrap(card, zone, showFront, isMyZone));
+    } else {
+      el.appendChild(mkCard(card, zone, showFront, isMyZone));
+    }
+  }
+}
+
+function mkStackWrap(card, zone, showFront, isMyZone) {
+  const wrap = document.createElement('div');
+  wrap.className = 'stack-wrap';
+  const depth = card.stack.length;
+  const maxShow = Math.min(depth, 3);
+  // 下のカードを影として表示（奥から順に）
+  for (let i = maxShow; i >= 1; i--) {
+    const shadow = document.createElement('div');
+    shadow.className = 'stack-under';
+    shadow.style.cssText = `width:var(--cw);height:var(--ch);top:${i*5}px;left:${i*4}px`;
+    wrap.appendChild(shadow);
+  }
+  // メインカード（一番上）
+  const cardEl = mkCard(card, zone, showFront, isMyZone);
+  cardEl.style.position = 'relative';
+  // スタック枚数バッジ
+  const badge = document.createElement('div');
+  badge.className = 'stack-badge';
+  badge.textContent = `📚${depth + 1}`;
+  cardEl.appendChild(badge);
+  wrap.appendChild(cardEl);
+  // ラップ全体のサイズをカードサイズに合わせる
+  wrap.style.cssText = `position:relative;flex-shrink:0;width:var(--cw);height:calc(var(--ch) + ${maxShow*5}px)`;
+  return wrap;
+}
+
+function mkCard(card, zone, showFront, isMyZone) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.dataset.cardId = card.id;
+  el.dataset.zone = zone;
+  if (card.tapped) el.classList.add('tapped');
+
+  if (card.hidden || !card.imageId || !imageStore.has(card.imageId)) {
+    el.innerHTML = '<div class="card-back">🎴</div>';
+  } else if (card.faceDown) {
+    // 裏向き：自分のゾーンならプレビュー不可（秘密）、裏向きバッジ表示
+    el.innerHTML = '<div class="card-back">🎴</div>';
+    el.style.position = 'relative';
+    const fdBadge = document.createElement('div');
+    fdBadge.style.cssText = 'position:absolute;bottom:2px;left:0;right:0;text-align:center;background:rgba(0,0,0,0.75);color:#aaa;font-size:9px;padding:1px 0;pointer-events:none;z-index:5';
+    fdBadge.textContent = '裏向き';
+    el.appendChild(fdBadge);
+  } else {
+    const src = imageStore.get(card.imageId);
+    el.innerHTML = `<img src="${src}" alt="${card.name || ''}"
+      onmouseenter="showPrev(event,'${src}')" onmouseleave="hidePrev()">`;
+  }
+
+  // カード名ラベル（隠し状態でなければ表示）
+  if (card.name && !card.hidden) {
+    el.style.position = 'relative';
+    const _nl = document.createElement('div');
+    _nl.className = 'card-name-label';
+    _nl.textContent = card.name;
+    el.appendChild(_nl);
+  }
+
+  if (isMyZone && !card.hidden) {
+    el.draggable = true;
+    el.addEventListener('dragstart', onDragStart);
+    el.addEventListener('contextmenu', e => { e.preventDefault(); openCtx(e, card, zone, true); });
+    el.addEventListener('dblclick', () => dblCard(card, zone));
+    if (zone === 'battleZone') {
+      el.addEventListener('click', e => {
+        // 進化モード中：このカードを進化先として選択
+        if (S.evolveFrom) {
+          e.stopPropagation();
+          const { card: fromCard, zone: fromZone } = S.evolveFrom;
+          act('stack_on', { cardId: fromCard.id, fromZone, targetId: card.id });
+          cancelEvolveMode();
+          return;
+        }
+        if (S.stackUnderFrom) {
+          e.stopPropagation();
+          const { card: fromCard, zone: fromZone } = S.stackUnderFrom;
+          if (fromCard.id !== card.id) {
+            act('stack_under', { cardId: fromCard.id, fromZone, targetId: card.id });
+          }
+          cancelStackUnderMode();
+          return;
+        }
+        act('tap', { cardId: card.id, zone });
+      });
+    } else if (zone === 'manaZone') {
+      el.addEventListener('click', () => act('tap', { cardId: card.id, zone }));
+    }
+  } else if (!isMyZone && !card.hidden) {
+    el.addEventListener('contextmenu', e => { e.preventDefault(); openCtx(e, card, zone, false); });
+  }
+  return el;
+}
+
+function renderShields(id, shields, isMine) {
+  const el = $(id); el.innerHTML = '';
+
+  // シールドを位置番号でマッピング
+  const byPos = new Map();
+  shields.forEach(sc => {
+    const pos = sc.shieldPos !== undefined ? sc.shieldPos : byPos.size;
+    byPos.set(pos, sc);
+  });
+
+  // スロット総数: 最大位置番号+1 か 5 の大きい方（ゲーム開始前は shields から推定）
+  const gs = S.gs;
+  const playerData = gs ? gs.players.find(p =>
+    p.shieldZone === shields ||
+    (isMine ? gs.myIndex : 1 - gs.myIndex) === gs.players.indexOf(p)
+  ) : null;
+  // playerData から shieldSlotCount を取得（なければ最低5スロット）
+  const myIdx = gs ? gs.myIndex : 0;
+  const targetIdx = isMine ? myIdx : 1 - myIdx;
+  const slotCount = (gs && gs.players[targetIdx] && gs.players[targetIdx].shieldSlotCount)
+    ? gs.players[targetIdx].shieldSlotCount
+    : Math.max(5, byPos.size > 0 ? Math.max(...byPos.keys()) + 1 : 0);
+
+  // スロット数が0なら最低1スロット表示
+  const totalSlots = Math.max(slotCount, byPos.size > 0 ? 1 : 1);
+
+  for (let i = 0; i < totalSlots; i++) {
+    const sc = byPos.get(i);
+
+    if (!sc) {
+      // 破れた（空の）スロット
+      const empty = document.createElement('div');
+      empty.className = 'card';
+      empty.style.cssText = 'opacity:0.18;border:1px dashed var(--border);border-radius:4px;flex-shrink:0';
+      empty.innerHTML = '<div class="card-back" style="background:transparent"></div>';
+      el.appendChild(empty);
+      continue;
+    }
+
+    const s = document.createElement('div');
+    s.className = 'card';
+    s.dataset.cardId = sc.id;
+    s.dataset.zone = isMine ? 'shieldZone' : 'opp_shieldZone';
+
+    // 表向きシールド（revealed=true かつ imageId あり）
+    if (!sc.hidden && sc.imageId && imageStore.has(sc.imageId)) {
+      const src = imageStore.get(sc.imageId);
+      s.innerHTML = `<img src="${src}" alt="${sc.name||''}"
+        onmouseenter="showPrev(event,'${src}')" onmouseleave="hidePrev()">`;
+      const badge = document.createElement('div');
+      badge.style.cssText = 'position:absolute;top:2px;right:2px;background:rgba(200,160,0,0.9);color:#000;font-size:9px;padding:1px 4px;border-radius:6px;font-weight:bold;z-index:5;pointer-events:none';
+      badge.textContent = '公開';
+      s.style.position = 'relative';
+      s.appendChild(badge);
+    } else {
+      s.innerHTML = '<div class="card-back">🛡</div>';
+    }
+
+    if (isMine) {
+      s.draggable = true;
+      s.addEventListener('dragstart', onDragStart);
+      s.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        openCtx(e, sc, 'shieldZone', true);
+      });
+    }
+    el.appendChild(s);
+  }
+}
+
+function renderGrave(id, cards, isMine) {
+  const existing = $(id);
+  const newEl = document.createElement('div');
+  newEl.id = id;
+  if (!cards.length) {
+    newEl.className = 'grave-empty';
+    newEl.textContent = '空';
+    newEl.onclick = () => openGrave(isMine ? 'my' : 'opp');
+  } else {
+    const top = cards[cards.length - 1];
+    const src = top.imageId ? imageStore.get(top.imageId) : null;
+    newEl.className = 'grave-wrap';
+    newEl.onclick = () => openGrave(isMine ? 'my' : 'opp');
+    if (src) newEl.innerHTML = `<img src="${src}"><span class="gcnt">${cards.length}</span>`;
+    else newEl.innerHTML = `<div class="card-back" style="width:100%;height:var(--ch)">🎴</div><span class="gcnt">${cards.length}</span>`;
+  }
+  // 自分の墓地はドラッグ&ドロップ先にする
+  if (isMine) {
+    newEl.addEventListener('dragover', e => { e.preventDefault(); newEl.classList.add('drag-over'); });
+    newEl.addEventListener('dragleave', () => newEl.classList.remove('drag-over'));
+    newEl.addEventListener('drop', e => {
+      e.preventDefault(); newEl.classList.remove('drag-over');
+      if (!S.drag) return;
+      const { cardId, fromZone } = S.drag; S.drag = null;
+      if (fromZone === 'graveyard') return;
+      mv(cardId, fromZone, 'graveyard');
+    });
+  }
+  existing.replaceWith(newEl);
+}
+
+function toggleLog() {
+  S.logCollapsed = !S.logCollapsed;
+  const lb = $('log-panel');
+  lb.classList.toggle('collapsed', S.logCollapsed);
+  $('log-toggle-icon').textContent = S.logCollapsed ? '▼' : '▲';
+}
+
+function renderLog(log) {
+  const lb = $('log-panel');
+  lb.innerHTML = (log || []).slice(0, 15).map(e => `<div class="log-entry">${e.msg}</div>`).join('');
+  // 折りたたみ状態を維持
+  if (S.logCollapsed) lb.classList.add('collapsed');
+}
+
+// ================================================================
+// ACTIONS
+// ================================================================
+function act(type, extra = {}) {
+  const action = { type, ...extra };
+  if (S.isHost) {
+    // ホスト: 自分で処理
+    const result = engine.processAction(0, action);
+    if (result.error) { toast(result.error); return; }
+    if (result.priv) handlePrivInfo(result.priv);
+    if (result.toOpp) sendP2P(result.toOpp); // ゲストへ
+    if (result.toReq) sendP2P(result.toReq); // ゲストへ（req側）
+    S.gs = engine.getStateFor(0);
+    renderGame();
+    sendP2P({ type: 'state', state: engine.getStateFor(1) });
+    // ターン変化チェック
+    if (type === 'end_turn') showTurnBanner(engine.gs.turn === 0);
+  } else {
+    // ゲスト: ホストに送る
+    sendP2P({ type: 'action', action });
+  }
+}
+
+function handlePrivInfo(data) {
+  switch (data.type) {
+    case 'deck_view':
+      S.deckViewMode = 'view'; S.deckViewCards = data.cards;
+      showDeckModal('山札確認', data.cards, false); break;
+    case 'deck_search':
+      S.deckViewMode = 'search'; S.deckViewCards = data.cards;
+      showDeckModal('サーチ', data.cards, true); break;
+    case 'look_top': showLookTop(data.cards); break;
+    case 'shield_preview': showShieldBreakModal(data.card); break;
+    case 'shields_peek': showShieldCheckModal(data.cards); break;
+  }
+}
+
+
+// ================================================================
+// シールド確認
+// ================================================================
+function doCheckShields() {
+  if (!S.gs) { toast('ゲームが開始されていません'); return; }
+  if (S.isHost) {
+    // ホスト: エンジンから直接シールドデータ取得（確実）
+    const myShields = engine.gs.players[0].shieldZone.map(c => ({ ...c }));
+    if (myShields.length === 0) { toast('シールドがありません'); return; }
+    showShieldCheckModal(myShields);
+  } else {
+    // ゲスト: ホスト経由でリクエスト
+    act('peek_shields');
+  }
+}
+
+function _nextSTrigger() {
+  if (S.sTriggerQueue && S.sTriggerQueue.length > 0) {
+    const next = S.sTriggerQueue.shift();
+    setTimeout(() => showShieldBreakModal(next), 350);
+  }
+}
+
+function showShieldCheckModal(cards) {
+  const container = $('schk-cards');
+  container.innerHTML = '';
+  const peeked   = new Set(); // 確認済み（めくり済み）
+  const selected = new Set(); // 選択済み
+  const elMap    = new Map(); // cardId -> DOM element
+
+  // カード要素の見た目を更新
+  const refreshCard = (card) => {
+    const el = elMap.get(card.id);
+    if (!el) return;
+    const isSel  = selected.has(card.id);
+    const isPeek = peeked.has(card.id);
+    // 枠色
+    el.style.borderColor = isSel ? 'var(--accent2)' : 'transparent';
+    el.style.boxShadow   = isSel ? '0 0 10px rgba(31,111,235,0.7)' : '';
+    // 中身
+    const inner = el.querySelector('.schk-inner');
+    const src = card.imageId ? imageStore.get(card.imageId) : null;
+    if (isPeek && src) {
+      inner.innerHTML = `<img src="${src}" style="width:100%;height:100%;object-fit:cover"
+        onmouseenter="showPrev(event,'${src}')" onmouseleave="hidePrev()">`;
+    } else if (isPeek) {
+      inner.innerHTML = `<div class="card-back" style="font-size:11px;padding:4px;text-align:center">${card.name||'?'}</div>`;
+    } else {
+      // 未確認: 裏向き表示
+      inner.innerHTML = '<div class="card-back" style="font-size:14px">🛡</div>';
+    }
+    // 名前バッジ（確認済みのみ表示）
+    const badge = el.querySelector('.schk-badge');
+    badge.textContent = isPeek ? (card.name || '？') : 'タップで確認';
+    badge.style.color  = isPeek ? '#fff' : 'var(--accent2)';
+  };
+
+  const updateUI = () => {
+    $('schk-count').textContent =
+      `確認済: ${peeked.size} / ${cards.length}枚　選択: ${selected.size}枚`;
+    const foot = $('schk-foot');
+    foot.innerHTML = '';
+
+    // 全確認 / 全選択 / 全解除
+    if (peeked.size < cards.length) {
+      const peekAllBtn = document.createElement('button');
+      peekAllBtn.className = 'btn-gray btn-sm';
+      peekAllBtn.textContent = '👁 全て確認';
+      peekAllBtn.onclick = () => {
+        cards.forEach(c => peeked.add(c.id));
+        cards.forEach(c => refreshCard(c));
+        updateUI();
+      };
+      foot.appendChild(peekAllBtn);
+    }
+
+    if (peeked.size > 0) {
+      const selAllBtn = document.createElement('button');
+      selAllBtn.className = 'btn-gray btn-sm';
+      const allPeekedSelected = [...peeked].every(id => selected.has(id));
+      selAllBtn.textContent = allPeekedSelected ? '全解除' : '確認済を全選択';
+      selAllBtn.onclick = () => {
+        if (allPeekedSelected) {
+          selected.clear();
+        } else {
+          peeked.forEach(id => selected.add(id));
+        }
+        cards.forEach(c => refreshCard(c));
+        updateUI();
+      };
+      foot.appendChild(selAllBtn);
+    }
+
+    if (selected.size > 0) {
+      const toHandBtn = document.createElement('button');
+      toHandBtn.className = 'btn-blue btn-sm';
+      toHandBtn.textContent = `✋ 手札へ（${selected.size}枚）`;
+      toHandBtn.onclick = () => {
+        [...selected].forEach(id => mv(id, 'shieldZone', 'hand'));
+        closeM('modal-shield-check');
+      };
+      foot.appendChild(toHandBtn);
+
+      const stBtn = document.createElement('button');
+      stBtn.className = 'btn-green btn-sm';
+      stBtn.textContent = `🔺 S・トリガー宣言（${selected.size}枚）`;
+      stBtn.onclick = () => {
+        closeM('modal-shield-check');
+        const selCards = cards.filter(c => selected.has(c.id));
+        if (selCards.length === 0) return;
+        S.sTriggerQueue = selCards.slice(1);
+        showShieldBreakModal(selCards[0]);
+      };
+      foot.appendChild(stBtn);
+
+      const toBattleBtn = document.createElement('button');
+      toBattleBtn.className = 'btn-gray btn-sm';
+      toBattleBtn.textContent = `⚔ バトルゾーンへ`;
+      toBattleBtn.onclick = () => {
+        const faceUp = confirm('バトルゾーンへ置く向きを選んでください\n[OK] → 表向き\n[キャンセル] → 裏向き');
+        [...selected].forEach(id =>
+          act('move_card', { cardId: id, fromZone: 'shieldZone', toZone: 'battleZone', faceDown: !faceUp })
+        );
+        closeM('modal-shield-check');
+      };
+      foot.appendChild(toBattleBtn);
+
+      const toManaBtn = document.createElement('button');
+      toManaBtn.className = 'btn-gray btn-sm';
+      toManaBtn.textContent = `💧 マナゾーンへ`;
+      toManaBtn.onclick = () => {
+        [...selected].forEach(id => mv(id, 'shieldZone', 'manaZone'));
+        closeM('modal-shield-check');
+      };
+      foot.appendChild(toManaBtn);
+    }
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'btn-gray btn-sm';
+    closeBtn.textContent = '閉じる';
+    closeBtn.onclick = () => closeM('modal-shield-check');
+    foot.appendChild(closeBtn);
+  };
+
+  // カード要素を生成（最初は全て裏向き）
+  cards.forEach(card => {
+    const el = document.createElement('div');
+    el.className = 'schk-card card';
+    el.dataset.cardId = card.id;
+    el.style.cssText = 'width:80px;height:112px;cursor:pointer;position:relative;border:2px solid transparent;border-radius:6px;overflow:hidden;flex-shrink:0;transition:border-color .15s,box-shadow .15s';
+
+    // 内側コンテナ
+    const inner = document.createElement('div');
+    inner.className = 'schk-inner';
+    inner.style.cssText = 'width:100%;height:100%';
+    inner.innerHTML = '<div class="card-back" style="font-size:14px">🛡</div>';
+    el.appendChild(inner);
+
+    // 下部バッジ
+    const badge = document.createElement('div');
+    badge.className = 'schk-badge';
+    badge.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.8);font-size:9px;text-align:center;padding:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none';
+    badge.textContent = 'タップで確認';
+    badge.style.color = 'var(--accent2)';
+    el.appendChild(badge);
+
+    elMap.set(card.id, el);
+
+    el.addEventListener('click', () => {
+      if (!peeked.has(card.id)) {
+        // 未確認 → めくって確認＆選択
+        peeked.add(card.id);
+        selected.add(card.id);
+      } else {
+        // 確認済み → 選択トグル
+        if (selected.has(card.id)) {
+          selected.delete(card.id);
+        } else {
+          selected.add(card.id);
+        }
+      }
+      refreshCard(card);
+      updateUI();
+    });
+
+    container.appendChild(el);
+  });
+
+  if (cards.length === 0) {
+    container.innerHTML = '<span style="color:var(--muted)">シールドがありません</span>';
+  }
+  updateUI();
+  openM('modal-shield-check');
+}
+
+// ================================================================
+// Sトリガー / シールドブレイクモーダル
+// ================================================================
+let sbCard = null; // 現在確認中のシールドカード
+
+function breakShieldFlow(cardId) {
+  // preview_shield アクションでカードを取得してからモーダルを開く
+  act('preview_shield', { cardId });
+}
+
+function showShieldBreakModal(card) {
+  sbCard = card;
+  // カード画像
+  const imgDiv = $('sb-img');
+  if (card.imageId && imageStore.has(card.imageId)) {
+    const src = imageStore.get(card.imageId);
+    imgDiv.innerHTML = `<img src="${src}" style="width:100%;height:100%;object-fit:cover">`;
+  } else {
+    imgDiv.innerHTML = `<div class="card-back" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:13px">${card.name||'?'}</div>`;
+  }
+  $('sb-name').textContent = card.name || '（名前なし）';
+  $('sb-phase-confirm').style.display = '';
+  $('sb-phase-zone').style.display = 'none';
+  openM('modal-shield-break');
+}
+
+function sbDeclare() {
+  // S・トリガー宣言 → ゾーン選択フェーズへ
+  $('sb-phase-confirm').style.display = 'none';
+  $('sb-phase-zone').style.display = '';
+  toast('S・トリガー発動！');
+  act('chat_log', { msg: `🔺 ${S.playerName} が S・トリガー宣言！（${sbCard.name||'?'}）` });
+}
+
+function sbToHand() {
+  if (!sbCard) return;
+  mv(sbCard.id, 'shieldZone', 'hand');
+  sbCard = null;
+  closeM('modal-shield-break');
+  _nextSTrigger();
+}
+
+function sbZone(toZone) {
+  if (!sbCard) return;
+  mv(sbCard.id, 'shieldZone', toZone);
+  sbCard = null;
+  closeM('modal-shield-break');
+  _nextSTrigger();
+}
+
+// ================================================================
+// 進化モード
+// ================================================================
+function startEvolveMode(card, zone) {
+  S.evolveFrom = { card, zone };
+  $('evolve-banner').style.display = 'block';
+  document.querySelector('.game-layout') && document.querySelector('.game-layout').classList.add('evolve-mode');
+}
+function showStackModal(topCard) {
+  const allCards = [topCard, ...(topCard.stack || [])];
+  // デッキモーダルを流用してスタック表示
+  $('mdeck-title').textContent = `スタック（${allCards.length}枚）`;
+  $('mdeck-tip').textContent = '上から順に表示。一番上が場に出ているカードです。';
+  const body = $('mdeck-body');
+  body.innerHTML = '';
+  allCards.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'deck-row';
+    const imgWrap = document.createElement('div');
+    imgWrap.style.cssText = 'width:var(--cw);height:var(--ch);flex-shrink:0;border-radius:4px;overflow:hidden';
+    if (c.imageId && imageStore.has(c.imageId)) {
+      imgWrap.innerHTML = `<img src="${imageStore.get(c.imageId)}" style="width:100%;height:100%;object-fit:cover">`;
+    } else {
+      imgWrap.innerHTML = `<div class="card-back" style="width:100%;height:100%;font-size:11px;display:flex;align-items:center;justify-content:center">${c.name||'?'}</div>`;
+    }
+    const info = document.createElement('div');
+    info.style.cssText = 'flex:1;font-size:12px;color:var(--text)';
+    info.innerHTML = `<div style="font-weight:bold">${i===0?'👑 ':''}${c.name||'?'}</div><div style="color:var(--muted)">${i===0?'一番上（場）':i===allCards.length-1?'一番下':'上から'+(i+1)+'枚目'}</div>`;
+    row.appendChild(imgWrap);
+    row.appendChild(info);
+    body.appendChild(row);
+  });
+  const footer = $('mdeck-footer');
+  footer.innerHTML = '';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn'; closeBtn.textContent = '閉じる';
+  closeBtn.onclick = () => closeM('modal-deck');
+  footer.appendChild(closeBtn);
+  openM('modal-deck');
+}
+
+function cancelEvolveMode() {
+  S.evolveFrom = null;
+  $('evolve-banner').style.display = 'none';
+  const gl = document.querySelector('.game-layout');
+  if (gl) gl.classList.remove('evolve-mode');
+}
+
+function startStackUnderMode(card, zone) {
+  S.stackUnderFrom = { card, zone };
+  $('stack-under-banner').style.display = 'block';
+  document.querySelector('.game-layout') && document.querySelector('.game-layout').classList.add('stack-under-mode');
+}
+function cancelStackUnderMode() {
+  S.stackUnderFrom = null;
+  $('stack-under-banner').style.display = 'none';
+  const gl = document.querySelector('.game-layout');
+  if (gl) gl.classList.remove('stack-under-mode');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (S.evolveFrom) cancelEvolveMode();
+    if (S.stackUnderFrom) cancelStackUnderMode();
+  }
+});
+
+function mv(cardId, fromZone, toZone, posOrOpts) {
+  const opts = {};
+  if (posOrOpts === 'top') opts.position = 'top';
+  else if (posOrOpts === 'bottom') opts.position = 'bottom';
+  else if (typeof posOrOpts === 'object') Object.assign(opts, posOrOpts);
+  act('move_card', { cardId, fromZone, toZone, ...opts });
+}
+
+function doViewDeck() { act('view_deck'); }
+function doSearch()   { act('search_deck'); }
+function doLookTop()  {
+  const n = parseInt(prompt('上から何枚確認しますか？', '3') || '3');
+  if (n > 0) act('look_top', { count: n });
+}
+function doReqPick() {
+  const msg = prompt('相手に送るメッセージ', '手札から1枚選んでください') || '手札から1枚選んでください';
+  act('request_pick', { message: msg });
+}
+
+// ================================================================
+// DRAG & DROP
+// ================================================================
+function onDragStart(e) {
+  const c = e.currentTarget;
+  S.drag = { cardId: c.dataset.cardId, fromZone: c.dataset.zone };
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', c.dataset.cardId);
+}
+function onDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drag-over');
+}
+function onDrop(e, toZone) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!S.drag) return;
+  const { cardId, fromZone } = S.drag; S.drag = null;
+  if (fromZone === toZone) return;
+  mv(cardId, fromZone, toZone);
+}
+document.addEventListener('dragend', () => {
+  document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+});
+
+// ================================================================
+// CONTEXT MENU
+// ================================================================
+function openCtx(e, card, zone, isMine) {
+  e.stopPropagation();
+  const menu = $('ctx'), items = $('ctx-items');
+  $('ctx-title').textContent = card.name || 'カード';
+  items.innerHTML = '';
+
+  if (!isMine) {
+    addCI('👁', '内容を確認', () => { if(card.imageId&&imageStore.has(card.imageId)) showReveal(card,''); });
+    posMenu(e); return;
+  }
+
+  const ci = (icon, label, fn, d=false) => addCI(icon, label, fn, d);
+  const csep = () => { const s=document.createElement('div'); s.className='csep'; items.appendChild(s); };
+
+  // シールドゾーン移動ヘルパー（裏/表 選択ダイアログ）
+  const mvShield = (fromZ) => {
+    // 小さな選択肢を出す
+    $('ctx').style.display = 'none';
+    const choice = confirm('表向きで置きますか？\n[OK] → 表向き（両者から見える）\n[キャンセル] → 裏向き（通常）');
+    act('move_card', { cardId: card.id, fromZone: fromZ, toZone: 'shieldZone', revealed: choice });
+  };
+
+  if (zone === 'hand') {
+    ci('⚔','→ バトルゾーン', ()=>mv(card.id,zone,'battleZone'));
+    ci('💧','→ マナゾーン（チャージ）', ()=>mv(card.id,zone,'manaZone'));
+    ci('🛡','→ シールドゾーンに追加', ()=>mvShield(zone));
+    ci('💀','→ 墓地', ()=>mv(card.id,zone,'graveyard'),true);
+    ci('📚','→ 山札（上）', ()=>mv(card.id,zone,'deck','top'));
+    ci('📚','→ 山札（下）', ()=>mv(card.id,zone,'deck','bottom'));
+    csep();
+    const myBattle = S.gs.players[S.gs.myIndex].battleZone;
+    if (myBattle.length > 0) {
+      ci('🔺','進化（上に重ねる）', ()=>startEvolveMode(card, zone));
+      ci('📥','スタックの下に置く', ()=>startStackUnderMode(card, zone));
+      csep();
+    }
+    ci('👁','相手に公開', ()=>act('reveal',{cardId:card.id}));
+  } else if (zone === 'battleZone') {
+    ci('🔄', card.tapped?'アンタップ':'タップ', ()=>act('tap',{cardId:card.id,zone}));
+    ci(card.faceDown?'👁':'🙈', card.faceDown?'表向きにする':'裏向きにする', ()=>act('flip',{cardId:card.id,zone}));
+    csep();
+    ci('✋','→ 手札に戻す', ()=>mv(card.id,zone,'hand'));
+    ci('💧','→ マナゾーン', ()=>mv(card.id,zone,'manaZone'));
+    ci('🛡','→ シールドゾーンに追加', ()=>mvShield(zone));
+    ci('💀','→ 墓地', ()=>mv(card.id,zone,'graveyard'),true);
+    // バトルゾーン内で別のカードに重ねる
+    const myBattleCards = S.gs.players[S.gs.myIndex].battleZone;
+    if (myBattleCards.length > 1) {
+      csep();
+      ci('🔺','別のカードの上に重ねる（進化）', ()=>startEvolveMode(card, zone));
+      ci('📥','別のカードの下に置く', ()=>startStackUnderMode(card, zone));
+    }
+    if (card.stack && card.stack.length > 0) {
+      csep();
+      ci('📚','スタックを見る', ()=>showStackModal(card));
+      ci('🗑','スタック一番下を墓地へ', ()=>act('unstack_bottom',{cardId:card.id}),true);
+    }
+  } else if (zone === 'manaZone') {
+    ci('🔄', card.tapped?'アンタップ':'タップ', ()=>act('tap',{cardId:card.id,zone}));
+    ci(card.faceDown?'👁':'🙈', card.faceDown?'表向きにする':'裏向きにする', ()=>act('flip',{cardId:card.id,zone}));
+    csep();
+    ci('✋','→ 手札に戻す', ()=>mv(card.id,zone,'hand'));
+    ci('⚔','→ バトルゾーン', ()=>mv(card.id,zone,'battleZone'));
+    ci('🛡','→ シールドゾーンに追加', ()=>mvShield(zone));
+    ci('💀','→ 墓地', ()=>mv(card.id,zone,'graveyard'),true);
+  } else if (zone === 'shieldZone') {
+    ci('🖐','シールドを割る（Sトリガー確認）', ()=>{ hideCtx(); breakShieldFlow(card.id); });
+    ci('✋','手札へ直接（確認なし）', ()=>mv(card.id,zone,'hand'));
+    csep();
+    ci('⚔','→ バトルゾーン（表向き）', ()=>mv(card.id,zone,'battleZone'));
+    ci('💧','→ マナゾーン（表向き）', ()=>mv(card.id,zone,'manaZone'));
+    ci('💀','→ 墓地（表向き）', ()=>mv(card.id,zone,'graveyard'),true);
+    csep();
+    ci('📚','→ 山札（上）', ()=>mv(card.id,zone,'deck','top'));
+    ci('📚','→ 山札（下）', ()=>mv(card.id,zone,'deck','bottom'));
+  } else if (zone === 'graveyard') {
+    ci(card.faceDown?'👁':'🙈', card.faceDown?'表向きにする':'裏向きにする', ()=>act('flip',{cardId:card.id,zone}));
+    csep();
+    ci('✋','→ 手札に戻す', ()=>mv(card.id,zone,'hand'));
+    ci('⚔','→ バトルゾーン', ()=>mv(card.id,zone,'battleZone'));
+    ci('💧','→ マナゾーン', ()=>mv(card.id,zone,'manaZone'));
+    ci('🛡','→ シールドゾーンに追加', ()=>mvShield(zone));
+    ci('📚','→ 山札（上）', ()=>mv(card.id,zone,'deck','top'));
+    ci('📚','→ 山札（下）', ()=>mv(card.id,zone,'deck','bottom'));
+  } else if (zone === 'opp_battleZone') {
+    ci('💀','→ 相手の墓地', ()=>mv(card.id,zone,'opp_graveyard'));
+    ci('✋','→ 自分の手札（奪取）', ()=>mv(card.id,zone,'hand'));
+  }
+
+  posMenu(e);
+}
+
+function addCI(icon, label, fn, danger=false) {
+  const el = document.createElement('div');
+  el.className = 'ci' + (danger?' danger':'');
+  el.innerHTML = `<span>${icon}</span><span>${label}</span>`;
+  el.onclick = () => { hideCtx(); fn(); };
+  $('ctx-items').appendChild(el);
+}
+
+function posMenu(e) {
+  const menu = $('ctx'); menu.style.display = 'block';
+  let x = e.clientX, y = e.clientY;
+  if (x + menu.offsetWidth > window.innerWidth) x = window.innerWidth - menu.offsetWidth - 4;
+  if (y + menu.offsetHeight > window.innerHeight) y = window.innerHeight - menu.offsetHeight - 4;
+  menu.style.left = x + 'px'; menu.style.top = y + 'px';
+}
+function hideCtx() { $('ctx').style.display = 'none'; }
+document.addEventListener('click', hideCtx);
+
+function dblCard(card, zone) {
+  if (zone === 'battleZone' || zone === 'manaZone') act('tap', { cardId: card.id, zone });
+  else if (zone === 'hand') mv(card.id, zone, 'manaZone');
+}
+
+// 山札クリック
+function ctxMyDeck(e) {
+  $('ctx-title').textContent = '山札';
+  $('ctx-items').innerHTML = '';
+  addCI('🃏','ドロー（1枚）', ()=>act('draw',{count:1}));
+  addCI('🃏','ドロー（複数）', ()=>{ const n=parseInt(prompt('何枚？','2')||'2'); if(n>0)act('draw',{count:n}); });
+  addCI('🔀','シャッフル', ()=>act('shuffle'));
+  addCI('👁','上からN枚確認', doLookTop);
+  addCI('🔍','サーチ', doSearch);
+  // 区切り
+  const sep = document.createElement('div'); sep.className='csep'; $('ctx-items').appendChild(sep);
+  // 表/裏を選んでから移動するヘルパー
+  const mvTop = (toZone, label) => {
+    hideCtx();
+    if (toZone === 'hand') {
+      // 手札は常に非公開なので選択不要
+      act('move_top_card', { toZone });
+      return;
+    }
+    if (toZone === 'shieldZone') {
+      const revealed = confirm('表向きで置きますか？\n[OK] → 表向き（両者から見える）\n[キャンセル] → 裏向き（通常）');
+      act('move_top_card', { toZone, revealed });
+      return;
+    }
+    const faceUp = confirm(`${label}に置く向きを選んでください\n[OK] → 表向き\n[キャンセル] → 裏向き`);
+    act('move_top_card', { toZone, faceDown: !faceUp });
+  };
+  addCI('⚔','山札上 → バトルゾーン', ()=>mvTop('battleZone','バトルゾーン'));
+  addCI('💧','山札上 → マナゾーン',   ()=>mvTop('manaZone','マナゾーン'));
+  addCI('✋','山札上 → 手札',         ()=>mvTop('hand','手札'));
+  addCI('💀','山札上 → 墓地',         ()=>mvTop('graveyard','墓地'));
+  addCI('🛡','山札上 → シールドゾーン',()=>mvTop('shieldZone','シールドゾーン'));
+  posMenu(e);
+}
+function ctxOppDeck() { toast('相手の山札は操作できません'); }
+
+// ================================================================
+// DECK MODAL
+// ================================================================
+let ddi = null;
+function showDeckModal(title, cards, isSearch) {
+  $('mdeck-title').textContent = title;
+  $('mdeck-tip').textContent = isSearch
+    ? 'カードをクリックして手札に加える'
+    : 'ドラッグで並び替え → 「確定」で保存。右クリックで移動先を選べます。';
+  const c = $('mdeck-cards'); c.innerHTML = '';
+  S.deckViewCards = [...cards];
+
+  for (let i = 0; i < cards.length; i++) {
+    const card = cards[i];
+    const el = document.createElement('div');
+    el.className = 'card'; el.style.cssText = 'width:60px;height:84px';
+    el.dataset.di = i;
+    const src = card.imageId ? imageStore.get(card.imageId) : null;
+    if (src) el.innerHTML = `<img src="${src}" alt="${card.name}"
+        onmouseenter="showPrev(event,'${src}')" onmouseleave="hidePrev()">`;
+    else el.innerHTML = '<div class="card-back">🎴</div>';
+
+    // 山札からどのゾーンへでも移動できるコンテキストメニュー
+    const deckCtx = (ev, cc) => {
+      ev.preventDefault();
+      $('ctx-title').textContent = cc.name || 'カード';
+      $('ctx-items').innerHTML = '';
+      const mv2 = (toZone, pos) => { act('move_card',{cardId:cc.id,fromZone:'deck',toZone,position:pos}); closeM('modal-deck'); };
+      addCI('✋','→ 手札',            () => mv2('hand'));
+      addCI('⚔','→ バトルゾーン',    () => mv2('battleZone'));
+      addCI('💧','→ マナゾーン',      () => mv2('manaZone'));
+      addCI('🛡','→ シールドゾーン',  () => mv2('shieldZone'));
+      addCI('💀','→ 墓地',           () => mv2('graveyard'), true);
+      addCI('📚','→ 山札（上）',      () => mv2('deck','top'));
+      addCI('📚','→ 山札（下）',      () => mv2('deck','bottom'));
+      posMenu(ev);
+    };
+
+    if (isSearch) {
+      el.title = card.name; el.style.cursor = 'pointer';
+      el.onclick = () => { act('move_card',{cardId:card.id,fromZone:'deck',toZone:'hand'}); toast(card.name+' を手札へ'); closeM('modal-deck'); };
+      el.addEventListener('contextmenu', ev => deckCtx(ev, card));
+    } else {
+      el.draggable = true;
+      el.addEventListener('dragstart', ev => { ddi = parseInt(el.dataset.di); ev.dataTransfer.effectAllowed='move'; });
+      el.addEventListener('dragover', ev => ev.preventDefault());
+      el.addEventListener('drop', ev => {
+        ev.preventDefault();
+        const to = parseInt(el.dataset.di);
+        if (ddi === null || ddi === to) return;
+        const [item] = S.deckViewCards.splice(ddi, 1);
+        S.deckViewCards.splice(to, 0, item);
+        ddi = null;
+        showDeckModal(title, S.deckViewCards, false);
+      });
+      el.addEventListener('contextmenu', ev => deckCtx(ev, S.deckViewCards[parseInt(el.dataset.di)]));
+    }
+    c.appendChild(el);
+  }
+  $('mdeck-ok').style.display = isSearch ? 'none' : '';
+  openM('modal-deck');
+}
+
+function applyReorder() {
+  act('reorder_deck', { order: S.deckViewCards.map(c => c.id) });
+  closeM('modal-deck'); toast('山札の順番を更新しました');
+}
+
+function showLookTop(cards) {
+  $('mdeck-title').textContent = `山札 上${cards.length}枚`;
+  $('mdeck-tip').textContent = '右クリックで移動先を選べます';
+  const c = $('mdeck-cards'); c.innerHTML = '';
+  for (const card of cards) {
+    const el = document.createElement('div');
+    el.className = 'card'; el.style.cssText = 'width:72px;height:100px';
+    const src = card.imageId ? imageStore.get(card.imageId) : null;
+    if (src) el.innerHTML = `<img src="${src}">`;
+    else el.innerHTML = '<div class="card-back">🎴</div>';
+    el.addEventListener('contextmenu', ev => {
+      ev.preventDefault();
+      $('ctx-title').textContent = card.name || 'カード';
+      $('ctx-items').innerHTML = '';
+      const mv2 = (toZone, pos) => { act('move_card',{cardId:card.id,fromZone:'deck',toZone,position:pos}); closeM('modal-deck'); };
+      addCI('✋','→ 手札',            () => mv2('hand'));
+      addCI('⚔','→ バトルゾーン',    () => mv2('battleZone'));
+      addCI('💧','→ マナゾーン',      () => mv2('manaZone'));
+      addCI('🛡','→ シールドゾーン',  () => mv2('shieldZone'));
+      addCI('💀','→ 墓地',           () => mv2('graveyard'), true);
+      addCI('📚','→ 山札（上）',      () => mv2('deck','top'));
+      addCI('📚','→ 山札（下）',      () => mv2('deck','bottom'));
+      posMenu(ev);
+    });
+    c.appendChild(el);
+  }
+  $('mdeck-ok').style.display = 'none';
+  openM('modal-deck');
+}
+
+// ================================================================
+// GRAVEYARD MODAL
+// ================================================================
+function openGrave(side) {
+  const gs = S.gs; if (!gs) return;
+  const player = side === 'my' ? gs.players[gs.myIndex] : gs.players[1 - gs.myIndex];
+  $('mgrave-title').textContent = side === 'my' ? '自分の墓地' : '相手の墓地';
+  const c = $('mgrave-cards'); c.innerHTML = '';
+  const cards = [...player.graveyard].reverse();
+  if (!cards.length) { c.innerHTML = '<span style="color:var(--muted)">空です</span>'; }
+  else {
+    for (const card of cards) {
+      const el = document.createElement('div');
+      el.className = 'card'; el.style.cssText = 'width:72px;height:100px';
+      const src = card.imageId ? imageStore.get(card.imageId) : null;
+      if (src) el.innerHTML = `<img src="${src}" onmouseenter="showPrev(event,'${src}')" onmouseleave="hidePrev()">`;
+      else el.innerHTML = '<div class="card-back">🎴</div>';
+      if (side === 'my') el.addEventListener('contextmenu', e => { e.preventDefault(); closeM('modal-grave'); openCtx(e, card, 'graveyard', true); });
+      c.appendChild(el);
+    }
+  }
+  openM('modal-grave');
+}
+
+// ================================================================
+// PICK MODAL
+// ================================================================
+function showPickModal(msg) {
+  $('pick-msg').textContent = msg.message;
+  const c = $('pick-cards'); c.innerHTML = '';
+  for (const card of (msg.cards || [])) {
+    const el = document.createElement('div');
+    el.className = 'card'; el.style.cssText = 'width:80px;height:112px;cursor:pointer';
+    const src = card.imageId ? imageStore.get(card.imageId) : null;
+    if (src) el.innerHTML = `<img src="${src}" onmouseenter="showPrev(event,'${src}')" onmouseleave="hidePrev()">`;
+    else el.innerHTML = `<div class="card-back" style="font-size:11px;padding:4px;text-align:center">${card.name}</div>`;
+    el.onclick = () => {
+      const z = prompt('選んだカードの移動先:\ngraveyard / hand / battleZone / manaZone', 'graveyard') || 'graveyard';
+      act('pick_response', { cardId: card.id, toZone: z });
+      closeM('modal-pick');
+    };
+    c.appendChild(el);
+  }
+  openM('modal-pick');
+}
+
+// ================================================================
+// REVEAL
+// ================================================================
+function showReveal(card, fromName) {
+  $('rn-name').textContent = fromName ? fromName + ' が公開：' : '';
+  $('rn-card').textContent = card.name || '';
+  const img = $('rn-img');
+  const src = card.imageId ? imageStore.get(card.imageId) : null;
+  if (src) { img.src = src; img.style.display = 'block'; } else img.style.display = 'none';
+  $('reveal-notice').style.display = 'block';
+  setTimeout(() => $('reveal-notice').style.display = 'none', 5000);
+}
+
+// ================================================================
+// CARD PREVIEW
+// ================================================================
+function showPrev(e, src) {
+  $('prev-img').src = src;
+  $('card-preview').style.display = 'block';
+  movePrev(e);
+}
+function hidePrev() { $('card-preview').style.display = 'none'; }
+document.addEventListener('mousemove', e => {
+  if ($('card-preview').style.display !== 'none') movePrev(e);
+});
+function movePrev(e) {
+  const p = $('card-preview');
+  let x = e.clientX + 16, y = e.clientY - 60;
+  if (x + 180 > innerWidth) x = e.clientX - 196;
+  if (y + 252 > innerHeight) y = innerHeight - 256;
+  if (y < 0) y = 4;
+  p.style.left = x + 'px'; p.style.top = y + 'px';
+}
+
+// ================================================================
+// CHAT
+// ================================================================
+function appendChat(sender, text) {
+  const el = document.createElement('div');
+  el.className = 'cmsg';
+  el.innerHTML = `<div class="sender">${sender}</div><div class="txt">${text}</div>`;
+  $('chat-msgs').appendChild(el);
+  $('chat-msgs').scrollTop = 9999;
+  toast(`💬 ${sender}: ${text}`, 2000);
+}
+function sendChat() {
+  const inp = $('chat-in');
+  const text = inp.value.trim(); if (!text) return;
+  appendChat(S.playerName, text);
+  if (S.isHost) {
+    sendP2P({ type: 'chat_bcast', sender: S.playerName, text });
+  } else {
+    sendP2P({ type: 'chat', sender: S.playerName, text });
+  }
+  inp.value = '';
+}
+$('chat-in').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+$('inp-cname').addEventListener('keydown', e => { if (e.key === 'Enter') addTextCard(); });
+
+// ================================================================
+// TURN BANNER
+// ================================================================
+function showTurnBanner(isMyTurn) {
+  if (isMyTurn === undefined) isMyTurn = S.gs && S.gs.turn === S.gs.myIndex;
+  const ov = document.createElement('div'); ov.className = 'turn-overlay';
+  const bn = document.createElement('div'); bn.className = 'turn-banner';
+  bn.style.background = isMyTurn ? 'rgba(35,134,54,.9)' : 'rgba(218,54,51,.85)';
+  bn.style.color = '#fff';
+  bn.textContent = isMyTurn ? 'あなたのターン！' : '相手のターン';
+  ov.appendChild(bn); document.body.appendChild(ov);
+  setTimeout(() => ov.remove(), 2000);
+}
+
+// ================================================================
+// INIT
+// ================================================================
+
+// ── Auth ──────────────────────────────────────────
+function authTab(tab) {
+  document.getElementById('tab-login').classList.toggle('active', tab === 'login');
+  document.getElementById('tab-register').classList.toggle('active', tab === 'register');
+  document.getElementById('auth-pw2').style.display = tab === 'register' ? '' : 'none';
+  document.getElementById('auth-err').textContent = '';
+  S._authTab = tab;
+}
+S._authTab = 'login';
+
+async function doAuth() {
+  const user = document.getElementById('auth-user').value.trim();
+  const pw   = document.getElementById('auth-pw').value;
+  const pw2  = document.getElementById('auth-pw2').value;
+  const errEl = document.getElementById('auth-err');
+  errEl.textContent = '';
+  if (!user || !pw) { errEl.textContent = 'ユーザー名とパスワードを入力してください'; return; }
+  if (S._authTab === 'register' && pw !== pw2) { errEl.textContent = 'パスワードが一致しません'; return; }
+  const endpoint = S._authTab === 'register' ? '/api/register' : '/api/login';
+  try {
+    const r = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user, password: pw })
+    });
+    const data = await r.json();
+    if (!r.ok) { errEl.textContent = data.error || 'エラーが発生しました'; return; }
+    onAuthSuccess(data);
+  } catch(e) { errEl.textContent = 'サーバーに接続できません'; }
+}
+
+function onAuthSuccess(data) {
+  S.authToken = data.token;
+  S.authUser  = data.username;
+  S.savedDecks = data.decks || {};
+  // localStorage から移行（初回のみ）
+  if (Object.keys(S.savedDecks).length === 0) {
+    try {
+      const legacy = JSON.parse(localStorage.getItem(DECK_STORE_KEY) || '{}');
+      if (Object.keys(legacy).length > 0) { S.savedDecks = legacy; syncDecks(); }
+    } catch(e) {}
+  }
+  localStorage.setItem('cgs_token', data.token);
+  localStorage.setItem('cgs_user',  data.username);
+  // show username
+  const nameEl = document.getElementById('inp-name');
+  if (nameEl && (!nameEl.value || nameEl.value === 'Player')) nameEl.value = data.username;
+  const userDisplay = document.getElementById('auth-user-display');
+  if (userDisplay) userDisplay.textContent = data.username;
+  showScreen('cards');
+  renderDeckGrid();
+}
+
+async function tryAutoLogin() {
+  const token = localStorage.getItem('cgs_token');
+  if (!token) return;
+  try {
+    const r = await fetch('/api/verify', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!r.ok) { localStorage.removeItem('cgs_token'); return; }
+    const data = await r.json();
+    onAuthSuccess({ token, ...data });
+  } catch(e) {}
+}
+
+function doLogout() {
+  S.authToken  = null;
+  S.authUser   = null;
+  S.savedDecks = {};
+  localStorage.removeItem('cgs_token');
+  localStorage.removeItem('cgs_user');
+  showScreen('auth');
+}
+// ──────────────────────────────────────────────────
+renderDeckGrid();
+initWS(); // WebSocketサーバーに接続
+tryAutoLogin(); // 自動ログイン試行
+
+document.querySelectorAll('.overlay').forEach(m => {
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
+});
+</script>
+</body>
+</html>
