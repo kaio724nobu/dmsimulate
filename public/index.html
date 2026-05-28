@@ -2329,34 +2329,123 @@ function applyReorder() {
 }
 
 function showLookTop(cards) {
-  $('mdeck-title').textContent = `山札 上${cards.length}枚`;
-  $('mdeck-tip').textContent = '右クリックで移動先を選べます';
-  const c = $('mdeck-cards'); c.innerHTML = '';
-  for (const card of cards) {
-    const el = document.createElement('div');
-    el.className = 'card'; el.style.cssText = 'width:72px;height:100px';
-    const src = card.imageId ? imageStore.get(card.imageId) : null;
-    if (src) el.innerHTML = `<img src="${src}">`;
-    else el.innerHTML = '<div class="card-back">🎴</div>';
-    el.addEventListener('contextmenu', ev => {
-      ev.preventDefault();
-      $('ctx-title').textContent = card.name || 'カード';
-      $('ctx-items').innerHTML = '';
-      const mv2 = (toZone, pos) => { act('move_card',{cardId:card.id,fromZone:'deck',toZone,position:pos}); closeM('modal-deck'); };
-      addCI('✋','→ 手札',            () => mv2('hand'));
-      addCI('⚔','→ バトルゾーン',    () => mv2('battleZone'));
-      addCI('💧','→ マナゾーン',      () => mv2('manaZone'));
-      addCI('🛡','→ シールドゾーン',  () => mv2('shieldZone'));
-      addCI('💀','→ 墓地',           () => mv2('graveyard'), true);
-      addCI('📚','→ 山札（上）',      () => mv2('deck','top'));
-      addCI('📚','→ 山札（下）',      () => mv2('deck','bottom'));
-      posMenu(ev);
-    });
-    c.appendChild(el);
+  let remaining     = cards.map(c => Object.assign({}, c));
+  let bottomQueue   = []; // 山札下に送る順（0=先に積まれる=より上）
+  let dragFromIdx   = null;
+
+  function renderLookTop() {
+    $('mdeck-title').textContent = `山札 上${cards.length}枚`;
+    $('mdeck-tip').textContent   = '右クリックで移動先を選べます';
+    const area = $('mdeck-cards');
+    area.innerHTML = '';
+
+    // ── 残りカード ──
+    const cardGrid = document.createElement('div');
+    cardGrid.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px';
+    for (const card of remaining) {
+      const el = document.createElement('div');
+      el.className = 'card';
+      el.style.cssText = 'width:72px;height:100px;position:relative;cursor:context-menu;flex-shrink:0';
+      const src = card.imageId ? imageStore.get(card.imageId) : null;
+      if (src) el.innerHTML = `<img src="${src}" style="width:100%;height:100%;object-fit:cover">`;
+      else      el.innerHTML = '<div class="card-back">🎴</div>';
+      if (card.name) {
+        const lbl = document.createElement('div');
+        lbl.className = 'card-name-label'; lbl.textContent = card.name;
+        el.appendChild(lbl);
+      }
+      el.addEventListener('contextmenu', ev => {
+        ev.preventDefault();
+        $('ctx-title').textContent = card.name || 'カード';
+        $('ctx-items').innerHTML = '';
+        const moveNow = (toZone, pos) => {
+          act('move_card', {cardId: card.id, fromZone: 'deck', toZone, position: pos});
+          remaining = remaining.filter(c => c.id !== card.id);
+          renderLookTop();
+        };
+        const toQueue = () => {
+          remaining = remaining.filter(c => c.id !== card.id);
+          bottomQueue.push(card);
+          renderLookTop();
+        };
+        addCI('✋','→ 手札',           () => moveNow('hand'));
+        addCI('⚔', '→ バトルゾーン',   () => moveNow('battleZone'));
+        addCI('💧','→ マナゾーン',      () => moveNow('manaZone'));
+        addCI('🛡','→ シールドゾーン',  () => moveNow('shieldZone'));
+        addCI('💀','→ 墓地',           () => moveNow('graveyard'), true);
+        addCI('📚','→ 山札（上）',      () => moveNow('deck','top'));
+        addCI('📚','→ 山札（下）に送る', toQueue);
+        posMenu(ev);
+      });
+      cardGrid.appendChild(el);
+    }
+    area.appendChild(cardGrid);
+
+    // ── 山札下 送り待ちリスト ──
+    if (bottomQueue.length > 0) {
+      const sec = document.createElement('div');
+      sec.style.cssText = 'border-top:1px solid var(--border);padding-top:8px;margin-top:4px';
+      const hdr = document.createElement('div');
+      hdr.style.cssText = 'font-size:11px;color:var(--muted);margin-bottom:6px';
+      hdr.textContent   = '📚 山札下に戻す順（ドラッグで並び替え・上＝先に引ける）';
+      sec.appendChild(hdr);
+
+      bottomQueue.forEach((qCard, i) => {
+        const row = document.createElement('div');
+        row.draggable = true;
+        row.style.cssText = 'display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:4px 8px;margin-bottom:3px;cursor:grab;user-select:none';
+        row.innerHTML = `
+          <span style="color:var(--muted);font-size:10px;min-width:14px">${i+1}</span>
+          <span style="flex:1;font-size:12px">${qCard.name || 'カード'}</span>
+          <button data-i="${i}" style="padding:1px 7px;font-size:11px;background:var(--danger);color:#fff;border:none;border-radius:3px;cursor:pointer">戻す</button>
+        `;
+        row.querySelector('button').onclick = () => {
+          const [removed] = bottomQueue.splice(i, 1);
+          remaining.push(removed);
+          renderLookTop();
+        };
+        row.addEventListener('dragstart', e => { dragFromIdx = i; e.dataTransfer.effectAllowed = 'move'; });
+        row.addEventListener('dragover',  e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; row.style.outline = '2px solid var(--accent)'; });
+        row.addEventListener('dragleave', () => { row.style.outline = ''; });
+        row.addEventListener('drop', e => {
+          e.preventDefault(); row.style.outline = '';
+          if (dragFromIdx === null || dragFromIdx === i) return;
+          const [item] = bottomQueue.splice(dragFromIdx, 1);
+          bottomQueue.splice(i, 0, item);
+          dragFromIdx = null;
+          renderLookTop();
+        });
+        sec.appendChild(row);
+      });
+      area.appendChild(sec);
+    }
+
+    // ── 確定ボタン ──
+    const okBtn = $('mdeck-ok');
+    if (bottomQueue.length > 0) {
+      okBtn.style.display = '';
+      okBtn.textContent   = `山札下に送る（${bottomQueue.length}枚）確定`;
+      okBtn.onclick = () => {
+        // 末尾から送ることで先頭のカードが山札上寄りになる
+        [...bottomQueue].reverse().forEach(c =>
+          act('move_card', {cardId: c.id, fromZone: 'deck', toZone: 'deck', position: 'bottom'})
+        );
+        closeM('modal-deck');
+      };
+    } else if (remaining.length === 0) {
+      okBtn.style.display = '';
+      okBtn.textContent   = '閉じる';
+      okBtn.onclick = () => closeM('modal-deck');
+    } else {
+      okBtn.style.display = 'none';
+    }
+
+    openM('modal-deck');
   }
-  $('mdeck-ok').style.display = 'none';
-  openM('modal-deck');
+
+  renderLookTop();
 }
+
 
 // ================================================================
 // GRAVEYARD MODAL
