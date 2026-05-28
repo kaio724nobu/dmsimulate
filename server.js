@@ -7,26 +7,21 @@ const { WebSocketServer } = require('ws');
 const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
+const { createClient } = require('@supabase/supabase-js');
 
-const fs = require('fs');
+const SUPABASE_URL = 'https://jonythqrwblexemakymv.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impvbnl0aHFyd2JsZXhlbWFreW15Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3OTk2ODk2NCwiZXhwIjoyMDk1NTQ0OTY0fQ.R0JUpkpxEinxqlqZUqDXp3kGBQICs-OlMfaDQaaPaSA';
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '20mb' }));
 
 // ================================================================
-// ユーザー認証 & デッキ保存 API
+// ユーザー認証 & デッキ保存 API (Supabase)
 // ================================================================
-const USERS_FILE = path.join(__dirname, 'users.json');
 const sessions = new Map(); // token → username
 
-function loadUsers() {
-  try { return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); }
-  catch { return {}; }
-}
-function saveUsers(users) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-}
 function hashPw(pw) {
   return crypto.createHash('sha256').update('cgs_salt_v1:' + pw).digest('hex');
 }
@@ -38,56 +33,71 @@ function authMW(req, res, next) {
 }
 
 // 新規登録
-app.post('/api/register', (req, res) => {
+app.post('/api/register', async (req, res) => {
   const { username, password } = req.body || {};
   const u = (username || '').trim();
   if (!u || !password) return res.status(400).json({ error: '入力してください' });
   if (u.length < 2 || u.length > 20) return res.status(400).json({ error: 'ユーザー名は2〜20文字にしてください' });
   if (password.length < 4) return res.status(400).json({ error: 'パスワードは4文字以上にしてください' });
-  const users = loadUsers();
-  if (users[u]) return res.status(400).json({ error: 'そのユーザー名はすでに使われています' });
-  users[u] = { passwordHash: hashPw(password), decks: {} };
-  saveUsers(users);
+  const { data, error } = await supabase
+    .from('users')
+    .insert({ username: u, password_hash: hashPw(password), decks: {} })
+    .select('username, decks')
+    .single();
+  if (error) {
+    if (error.code === '23505') return res.status(400).json({ error: 'そのユーザー名はすでに使われています' });
+    return res.status(500).json({ error: 'サーバーエラーが発生しました' });
+  }
   const token = crypto.randomBytes(32).toString('hex');
   sessions.set(token, u);
-  res.json({ token, username: u, decks: {} });
+  res.json({ token, username: u, decks: data.decks || {} });
 });
 
 // ログイン
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body || {};
   const u = (username || '').trim();
-  const users = loadUsers();
-  const user = users[u];
-  if (!user || user.passwordHash !== hashPw(password)) {
+  const { data, error } = await supabase
+    .from('users')
+    .select('username, password_hash, decks')
+    .eq('username', u)
+    .single();
+  if (error || !data || data.password_hash !== hashPw(password)) {
     return res.status(401).json({ error: 'ユーザー名またはパスワードが違います' });
   }
   const token = crypto.randomBytes(32).toString('hex');
   sessions.set(token, u);
-  res.json({ token, username: u, decks: user.decks || {} });
+  res.json({ token, username: u, decks: data.decks || {} });
 });
 
 // トークン検証（自動ログイン用）
-app.post('/api/verify', authMW, (req, res) => {
-  const users = loadUsers();
-  const user = users[req.username];
-  if (!user) return res.status(401).json({ error: '再ログインしてください' });
-  res.json({ username: req.username, decks: user.decks || {} });
+app.post('/api/verify', authMW, async (req, res) => {
+  const { data } = await supabase
+    .from('users')
+    .select('decks')
+    .eq('username', req.username)
+    .single();
+  if (!data) return res.status(401).json({ error: '再ログインしてください' });
+  res.json({ username: req.username, decks: data.decks || {} });
 });
 
 // デッキ取得
-app.get('/api/decks', authMW, (req, res) => {
-  const users = loadUsers();
-  res.json({ decks: users[req.username]?.decks || {} });
+app.get('/api/decks', authMW, async (req, res) => {
+  const { data } = await supabase
+    .from('users')
+    .select('decks')
+    .eq('username', req.username)
+    .single();
+  res.json({ decks: (data && data.decks) || {} });
 });
 
 // デッキ保存
-app.post('/api/decks', authMW, (req, res) => {
-  const { decks } = req.body || {};
-  const users = loadUsers();
-  if (!users[req.username]) return res.status(404).json({ error: 'ユーザーが見つかりません' });
-  users[req.username].decks = decks || {};
-  saveUsers(users);
+app.post('/api/decks', authMW, async (req, res) => {
+  const decks = req.body || {};
+  await supabase
+    .from('users')
+    .update({ decks })
+    .eq('username', req.username);
   res.json({ ok: true });
 });
 
